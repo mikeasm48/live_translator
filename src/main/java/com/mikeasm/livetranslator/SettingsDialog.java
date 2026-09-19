@@ -145,10 +145,22 @@ public final class SettingsDialog {
         save.addActionListener(e -> {
             String folder = folderField.getText().trim();
             if (!folder.isEmpty() && !folder.equals(config.folderId)) {
+                String complaint = FirstRun.checkFolder(folder);
+                if (complaint != null) {
+                    JOptionPane.showMessageDialog(null, complaint);
+                    return;
+                }
                 Settings.save("YC_FOLDER_ID", folder);
             }
             char[] key = keyField.getPassword();
             try {
+                if (key.length > 0) {
+                    String complaint = FirstRun.checkKey(key);
+                    if (complaint != null) {
+                        JOptionPane.showMessageDialog(null, complaint);
+                        return;
+                    }
+                }
                 if (key.length > 0 && !FirstRun.changeKey(key)) {
                     JOptionPane.showMessageDialog(null, "Ключ сохранить не удалось.");
                     return;

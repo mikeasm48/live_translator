@@ -42,7 +42,9 @@ public final class FirstRun {
     private static boolean askGraphically(boolean haveKey, boolean haveFolder) {
         JPanel panel = new JPanel();
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
-        panel.setPreferredSize(new Dimension(460, haveKey || haveFolder ? 190 : 240));
+        // Высоту не задаём: при фиксированной второе поле обрезалось, и ключ
+        // уходил в поле каталога — ровно эта путаница и случалась.
+        panel.setPreferredSize(null);
 
         JLabel intro = new JLabel("<html><body style='width:430px'>"
                 + "Для работы нужны доступы Yandex AI Studio. Ключ будет сохранён "
@@ -75,8 +77,9 @@ public final class FirstRun {
 
         if (!haveFolder) {
             String folder = folderField.getText().trim();
-            if (folder.isEmpty()) {
-                JOptionPane.showMessageDialog(null, "Каталог не указан.");
+            String complaint = checkFolder(folder);
+            if (complaint != null) {
+                JOptionPane.showMessageDialog(null, complaint);
                 return false;
             }
             Settings.save("YC_FOLDER_ID", folder);
@@ -84,6 +87,11 @@ public final class FirstRun {
         if (!haveKey) {
             char[] key = keyField.getPassword();
             try {
+                String complaint = checkKey(key);
+                if (complaint != null) {
+                    JOptionPane.showMessageDialog(null, complaint);
+                    return false;
+                }
                 if (!saveKey(key)) {
                     JOptionPane.showMessageDialog(null, "Ключ не сохранён.");
                     return false;
@@ -93,6 +101,40 @@ public final class FirstRun {
             }
         }
         return true;
+    }
+
+    /**
+     * Проверяет, что в поле каталога не оказался ключ.
+     * <p>
+     * У обоих значений узнаваемая форма: идентификатор каталога начинается с
+     * {@code b1}, ключ — с {@code AQVN}. Перепутать поля легко, а последствия
+     * невнятные: сервер отвечает про несовпадение каталога, и разбираться
+     * приходится по коду ошибки.
+     *
+     * @return жалоба для показа пользователю или null, если всё в порядке
+     */
+    public static String checkFolder(String folder) {
+        if (folder.isEmpty()) return "Каталог не указан.";
+        if (folder.startsWith("AQVN")) {
+            return "Похоже, это API-ключ, а не каталог.\n"
+                    + "Каталог начинается с b1 и виден в консоли Yandex Cloud\n"
+                    + "в адресе: console.yandex.cloud/folders/<каталог>";
+        }
+        if (!folder.startsWith("b1")) {
+            return "Идентификатор каталога должен начинаться с b1.\nВы указали: " + folder;
+        }
+        return null;
+    }
+
+    /** Симметричная проверка: в поле ключа не должен оказаться каталог. */
+    public static String checkKey(char[] key) {
+        if (key == null || key.length == 0) return "Ключ не указан.";
+        String text = new String(key);
+        if (text.startsWith("b1") && text.length() <= 24) {
+            return "Похоже, это идентификатор каталога, а не ключ.\n"
+                    + "API-ключ длиннее и начинается с AQVN.";
+        }
+        return null;
     }
 
     private static JLabel caption(String text) {
@@ -113,13 +155,22 @@ public final class FirstRun {
         System.out.println("Первая настройка Live Translator.");
         if (!haveFolder) {
             String folder = console.readLine("Идентификатор каталога (b1g…): ").trim();
-            if (folder.isEmpty()) return false;
+            String complaint = checkFolder(folder);
+            if (complaint != null) {
+                System.err.println(complaint);
+                return false;
+            }
             Settings.save("YC_FOLDER_ID", folder);
         }
         if (!haveKey) {
             // readPassword не отображает вводимое на экране.
             char[] key = console.readPassword("API-ключ (ввод скрыт): ");
             try {
+                String complaint = checkKey(key);
+                if (complaint != null) {
+                    System.err.println(complaint);
+                    return false;
+                }
                 return saveKey(key);
             } finally {
                 Arrays.fill(key, '\0');
