@@ -70,7 +70,7 @@ public final class Main {
         List<TranscriptView> views = new ArrayList<>();
         views.add(new ConsoleView());
         if (config.showUi) views.add(OverlayWindow.create(config, controlFor(capture, config.vadThreshold, sessionRef)));
-        SessionLog log = new SessionLog(Path.of("logs"));
+        SessionLog log = new SessionLog(AppPaths.logsDir());
         views.add(log);
         TranscriptView view = fanOut(views);
 

@@ -64,6 +64,16 @@
 
   <build>
     <finalName>live-translator</finalName>
+    <resources>
+      <!-- Заготовка словаря едет внутри jar: установленное приложение
+           разворачивает её в настройки пользователя при первом запуске. -->
+      <resource>
+        <directory>${project.basedir}</directory>
+        <includes>
+          <include>glossary.txt</include>
+        </includes>
+      </resource>
+    </resources>
     <plugins>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>

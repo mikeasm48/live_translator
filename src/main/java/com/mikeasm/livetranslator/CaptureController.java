@@ -84,7 +84,7 @@ public final class CaptureController implements AutoCloseable {
 
     public synchronized Path startRecording() throws IOException {
         if (recorder != null) return recorder.path();
-        recorder = new WavRecorder(Path.of("logs"), config.sampleRate);
+        recorder = new WavRecorder(AppPaths.logsDir(), config.sampleRate);
         return recorder.path();
     }
 

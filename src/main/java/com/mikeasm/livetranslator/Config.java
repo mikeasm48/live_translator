@@ -89,7 +89,8 @@ public final class Config {
         // потому что переводчик видит границы предложений.
         this.literature = !a.containsKey("no-literature");
         this.glossaryExplicit = a.containsKey("glossary");
-        this.glossaryPath = a.getOrDefault("glossary", Glossary.DEFAULT_FILE);
+        this.glossaryPath = a.containsKey("glossary")
+                ? a.get("glossary") : AppPaths.glossaryFile().toString();
     }
 
     /** Аргумент командной строки главнее сохранённых настроек. */

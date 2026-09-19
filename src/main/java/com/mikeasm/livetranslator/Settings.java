@@ -27,6 +27,8 @@ import java.util.concurrent.TimeUnit;
 public final class Settings {
 
     private static final Path PROJECT_FILE = Path.of(".env");
+    /** Куда пишутся изменения: рядом с исходниками или в настройки пользователя. */
+    private static final Path WRITE_FILE = AppPaths.settingsFile();
     private static final Path USER_FILE =
             Path.of(System.getProperty("user.home"), ".config", "live-translator", "config");
 
@@ -44,7 +46,7 @@ public final class Settings {
 
     /** Файл настроек проекта. */
     public static Path envPath() {
-        return PROJECT_FILE;
+        return WRITE_FILE;
     }
 
     /**
@@ -53,8 +55,9 @@ public final class Settings {
      */
     public static synchronized void save(String name, String value) {
         try {
-            List<String> lines = Files.isRegularFile(PROJECT_FILE)
-                    ? new java.util.ArrayList<>(Files.readAllLines(PROJECT_FILE, StandardCharsets.UTF_8))
+            if (WRITE_FILE.getParent() != null) Files.createDirectories(WRITE_FILE.getParent());
+            List<String> lines = Files.isRegularFile(WRITE_FILE)
+                    ? new java.util.ArrayList<>(Files.readAllLines(WRITE_FILE, StandardCharsets.UTF_8))
                     : new java.util.ArrayList<>();
 
             boolean replaced = false;
@@ -72,10 +75,10 @@ public final class Settings {
             }
             if (!replaced) lines.add(name + "=" + value);
 
-            Files.write(PROJECT_FILE, lines, StandardCharsets.UTF_8);
-            restrictPermissions(PROJECT_FILE);
+            Files.write(WRITE_FILE, lines, StandardCharsets.UTF_8);
+            restrictPermissions(WRITE_FILE);
             values.put(name, value);
-            origins.put(name, PROJECT_FILE.toString());
+            origins.put(name, WRITE_FILE.toString());
         } catch (IOException e) {
             System.err.println("Не удалось сохранить настройку " + name + ": " + e.getMessage());
         }
