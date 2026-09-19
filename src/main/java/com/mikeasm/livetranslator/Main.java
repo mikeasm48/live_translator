@@ -15,8 +15,12 @@ import java.util.concurrent.TimeUnit;
  */
 public final class Main {
 
+    /** Версия приложения — попадает в Info.plist значка. */
+    private static final String VERSION = "0.2.2";
+
     public static void main(String[] args) throws Exception {
         Config parsed = Config.parse(args);
+        AppBundle.ensureInstalled(VERSION);
 
         if (has(args, "--help") || has(args, "-h")) {
             printUsage();
