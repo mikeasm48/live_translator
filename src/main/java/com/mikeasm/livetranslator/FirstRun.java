@@ -30,6 +30,16 @@ public final class FirstRun {
         boolean haveKey = Settings.has("YC_API_KEY")
                 || Settings.has("YC_IAM_TOKEN")
                 || Settings.has("YC_API_KEY_CMD");
+
+        // Связка ключей общая для системы. Если ключ туда уже положила другая
+        // копия приложения, спрашивать его заново незачем — достаточно
+        // записать у себя, откуда его брать.
+        if (!haveKey && Keychain.exists()) {
+            Settings.save("YC_API_KEY_CMD", Keychain.READ_COMMAND);
+            System.out.println("Ключ найден в связке ключей.");
+            haveKey = true;
+        }
+
         boolean haveFolder = Settings.has("YC_FOLDER_ID");
         if (haveKey && haveFolder) return true;
 

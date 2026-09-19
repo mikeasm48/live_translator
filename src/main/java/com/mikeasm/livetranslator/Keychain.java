@@ -22,6 +22,34 @@ public final class Keychain {
 
     private Keychain() {}
 
+    /**
+     * Есть ли уже сохранённый ключ.
+     * <p>
+     * Имя записи фиксированное, а связка ключей общая для всей системы —
+     * значит, копия, установленная позже, может воспользоваться ключом,
+     * который положила предыдущая, и не спрашивать его заново.
+     */
+    public static boolean exists() {
+        if (!available()) return false;
+        try {
+            Process process = new ProcessBuilder("security", "find-generic-password",
+                    "-s", SERVICE)
+                    .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                    .redirectError(ProcessBuilder.Redirect.DISCARD)
+                    .start();
+            if (!process.waitFor(15, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                return false;
+            }
+            return process.exitValue() == 0;
+        } catch (IOException e) {
+            return false;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+    }
+
     public static boolean available() {
         return System.getProperty("os.name", "").toLowerCase().contains("mac");
     }
