@@ -27,25 +27,41 @@ public final class Keychain {
     }
 
     /**
-     * Кладёт секрет в связку ключей. Значение передаётся через стандартный ввод
-     * (дважды — утилита просит подтверждение), а не аргументом командной строки:
-     * аргументы видны в списке процессов, ввод — нет.
+     * Кладёт секрет в связку ключей.
+     * <p>
+     * Используется пакетный режим {@code security -i}: команда целиком подаётся
+     * в стандартный ввод уже запущенного процесса. Два очевидных способа не
+     * годятся. Передать ключ аргументом нельзя — аргументы видны всей системе
+     * в списке процессов. Отдать его в ответ на запрос {@code -w} тоже нельзя:
+     * при наличии управляющего терминала утилита спрашивает пароль напрямую у
+     * него и поданный ввод игнорирует, из-за чего запуск замирал на приглашении
+     * «password data for new item».
      */
     public static void store(char[] secret) throws IOException, InterruptedException {
-        Process process = new ProcessBuilder("security", "add-generic-password",
-                "-U",                                   // обновить, если запись уже есть
-                "-a", System.getProperty("user.name", "user"),
-                "-s", SERVICE,
-                "-w")
+        Process process = new ProcessBuilder("security", "-i")
                 .redirectErrorStream(true)
                 .start();
 
+        // Вывод вычитывается параллельно: иначе переполнение буфера подвесит
+        // утилиту до того, как она успеет завершиться.
+        StringBuilder output = new StringBuilder();
+        Thread reader = Thread.ofVirtual().start(() -> {
+            try {
+                output.append(new String(process.getInputStream().readAllBytes(),
+                        StandardCharsets.UTF_8));
+            } catch (IOException ignored) {
+                // процесс закрылся раньше — читать больше нечего
+            }
+        });
+
         try (OutputStream in = process.getOutputStream()) {
-            byte[] bytes = new String(secret).getBytes(StandardCharsets.UTF_8);
+            String command = "add-generic-password -U"
+                    + " -a " + quote(System.getProperty("user.name", "user"))
+                    + " -s " + quote(SERVICE)
+                    + " -w " + quote(new String(secret))
+                    + "\n";
+            byte[] bytes = command.getBytes(StandardCharsets.UTF_8);
             in.write(bytes);
-            in.write('\n');
-            in.write(bytes);
-            in.write('\n');
             in.flush();
             java.util.Arrays.fill(bytes, (byte) 0);
         }
@@ -54,10 +70,14 @@ public final class Keychain {
             process.destroyForcibly();
             throw new IOException("Связка ключей не ответила");
         }
+        reader.join(2000);
         if (process.exitValue() != 0) {
-            String output = new String(process.getInputStream().readAllBytes(),
-                    StandardCharsets.UTF_8).trim();
-            throw new IOException("Связка ключей отклонила запись: " + output);
+            throw new IOException("Связка ключей отклонила запись: " + output.toString().trim());
         }
+    }
+
+    /** Ключ может содержать что угодно, поэтому экранируем по правилам утилиты. */
+    private static String quote(String value) {
+        return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
     }
 }
