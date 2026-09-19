@@ -31,6 +31,8 @@ public final class RecognizerSession {
     private volatile long streamStartedAt;
     private volatile long maxIndexInStream;
     private volatile boolean stopped;
+    /** Пауза: поток закрыт и звук в облако не уходит, но сессию можно поднять. */
+    private volatile boolean paused;
     private volatile long reconnectDelay = RECONNECT_DELAY_MS;
     /** Метка текущего потока: закрытие устаревшего не должно поднимать новый. */
     private volatile Object currentToken;
@@ -125,20 +127,48 @@ public final class RecognizerSession {
         };
     }
 
+    /**
+     * Ставит распознавание на паузу: текущий поток закрывается, новый не
+     * открывается. Звук в облако не уходит вовсе, поэтому пауза ещё и
+     * останавливает расход денег.
+     */
+    public synchronized void pause() {
+        if (paused || stopped) return;
+        paused = true;
+        SpeechKitStream current = stream;
+        stream = null;
+        currentToken = null;
+        if (current != null) current.finish();
+    }
+
+    public synchronized void resume() {
+        if (!paused || stopped) return;
+        paused = false;
+        indexOffset.addAndGet(maxIndexInStream + 1);
+        open();
+    }
+
+    public boolean isPaused() {
+        return paused;
+    }
+
     /** Передаёт звук, попутно решая, не пора ли перезапустить поток. */
     public void sendAudio(byte[] pcm, boolean atPhraseBoundary) {
+        if (paused) return;
         rotateIfNeeded(atPhraseBoundary);
         SpeechKitStream current = stream;
         if (current != null) current.sendAudio(pcm);
     }
 
     public void sendSilence(int durationMs) {
+        if (paused) return;
         rotateIfNeeded(true);
         SpeechKitStream current = stream;
         if (current != null) current.sendSilence(durationMs);
     }
 
     private void rotateIfNeeded(boolean atPhraseBoundary) {
+        if (paused) return;
         long now = System.currentTimeMillis();
         long age = now - streamStartedAt;
         boolean soft = atPhraseBoundary && age > SOFT_LIMIT_MS;

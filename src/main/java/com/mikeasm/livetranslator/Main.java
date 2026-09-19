@@ -284,6 +284,20 @@ public final class Main {
                 RecognizerSession session = sessionRef.get();
                 if (session != null) session.restart();
             }
+
+            @Override
+            public boolean isPaused() {
+                RecognizerSession session = sessionRef.get();
+                return session != null && session.isPaused();
+            }
+
+            @Override
+            public void setPaused(boolean paused) {
+                RecognizerSession session = sessionRef.get();
+                if (session == null) return;
+                if (paused) session.pause();
+                else session.resume();
+            }
         };
     }
 

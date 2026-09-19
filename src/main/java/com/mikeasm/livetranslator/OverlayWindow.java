@@ -50,6 +50,7 @@ public final class OverlayWindow implements TranscriptView {
     private static final Color TEXT = new Color(0xEC, 0xEF, 0xF4);
     private static final Color MUTED = new Color(0x8A, 0x92, 0xA6);
     private static final Color RECORDING = new Color(0xE0, 0x5A, 0x5A);
+    private static final Color PAUSED = new Color(0xE8, 0xB3, 0x39);
 
     /** Что окно умеет попросить у приложения. */
     public interface Control {
@@ -74,6 +75,10 @@ public final class OverlayWindow implements TranscriptView {
 
         /** Языки изменили в настройках — распознавание должно их подхватить. */
         void languagesChanged();
+
+        boolean isPaused();
+
+        void setPaused(boolean paused);
     }
 
     /**
@@ -124,6 +129,7 @@ public final class OverlayWindow implements TranscriptView {
     private final JTextArea partialArea = new JTextArea(" ", 2, 1);
     private final JCheckBox showSource = new JCheckBox("оригинал", false);
     private final Config config;
+    private final JButton pauseButton = new JButton();
     private final JButton recordButton = new JButton();
     private final JComboBox<String> deviceBox = new JComboBox<>();
     private final JLabel statusLabel = new JLabel(" ");
@@ -208,6 +214,16 @@ public final class OverlayWindow implements TranscriptView {
             deviceBox.setEnabled(false);
         }
 
+        pauseButton.setFont(small);
+        pauseButton.setFocusPainted(false);
+        pauseButton.setEnabled(control != null);
+        pauseButton.addActionListener(e -> {
+            control.setPaused(!control.isPaused());
+            updatePauseButton();
+            setStatus(control.isPaused() ? "перевод на паузе" : "перевод идёт");
+        });
+        updatePauseButton();
+
         recordButton.setFont(small);
         recordButton.setFocusPainted(false);
         recordButton.setEnabled(control != null);
@@ -226,6 +242,8 @@ public final class OverlayWindow implements TranscriptView {
         statusLabel.setForeground(MUTED);
         statusLabel.setFont(small);
 
+        bar.add(pauseButton);
+        bar.add(Box.createHorizontalStrut(14));
         bar.add(deviceCaption);
         bar.add(deviceBox);
         bar.add(Box.createHorizontalStrut(10));
@@ -326,6 +344,14 @@ public final class OverlayWindow implements TranscriptView {
     private void tick() {
         levelBar.update(control.inputLevel(), control.silenceThreshold());
         updateRecordButton();
+        updatePauseButton();
+    }
+
+    private void updatePauseButton() {
+        if (control == null) return;
+        boolean paused = control.isPaused();
+        pauseButton.setText(paused ? "▶ продолжить" : "⏸ пауза");
+        pauseButton.setForeground(paused ? PAUSED : TEXT);
     }
 
     private void updateRecordButton() {
