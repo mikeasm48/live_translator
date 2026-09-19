@@ -80,7 +80,8 @@ public final class AppBundle {
 
     /** Запускает тем же интерпретатором Java, которым запущено приложение сейчас. */
     private static String launcherScript(Path jar) {
-        Path java = Path.of(System.getProperty("java.home"), "bin", "java");
+        Path java = stablePath(Path.of(System.getProperty("java.home"), "bin", "java"));
+        jar = stablePath(jar);
         Path icon = Path.of(System.getProperty("user.home"), "Applications",
                 NAME + ".app/Contents/Resources/live-translator.icns");
         return """
@@ -116,6 +117,24 @@ public final class AppBundle {
                 </dict>
                 </plist>
                 """.formatted(NAME, NAME, version, version);
+    }
+
+    /**
+     * Переводит путь внутрь Homebrew на устойчивый вид.
+     * <p>
+     * Каталог {@code Cellar} содержит номер версии и исчезает при обновлении,
+     * поэтому записанный в значок путь после {@code brew upgrade} указывал бы
+     * в никуда. Симлинк {@code opt} ведёт на текущую версию всегда.
+     */
+    public static Path stablePath(Path path) {
+        String text = path.toString();
+        var matcher = java.util.regex.Pattern
+                .compile("^(.*)/Cellar/([^/]+)/[^/]+/(.*)$")
+                .matcher(text);
+        if (!matcher.matches()) return path;
+
+        Path stable = Path.of(matcher.group(1), "opt", matcher.group(2), matcher.group(3));
+        return Files.exists(stable) ? stable : path;
     }
 
     /** Путь к jar, из которого запущено приложение. */
