@@ -50,7 +50,9 @@ public final class OverlayWindow implements TranscriptView {
     private static final Color TEXT = new Color(0xEC, 0xEF, 0xF4);
     private static final Color MUTED = new Color(0x8A, 0x92, 0xA6);
     private static final Color RECORDING = new Color(0xE0, 0x5A, 0x5A);
-    private static final Color PAUSED = new Color(0xE8, 0xB3, 0x39);
+    private static final Color PAUSED = new Color(0xF5, 0xC4, 0x4E);
+    private static final Color BUTTON = new Color(0x2A, 0x2F, 0x3A);
+    private static final Color BUTTON_EDGE = new Color(0x3C, 0x43, 0x52);
 
     /** Что окно умеет попросить у приложения. */
     public interface Control {
@@ -214,8 +216,7 @@ public final class OverlayWindow implements TranscriptView {
             deviceBox.setEnabled(false);
         }
 
-        pauseButton.setFont(small);
-        pauseButton.setFocusPainted(false);
+        styleButton(pauseButton, small);
         pauseButton.setEnabled(control != null);
         pauseButton.addActionListener(e -> {
             control.setPaused(!control.isPaused());
@@ -224,8 +225,7 @@ public final class OverlayWindow implements TranscriptView {
         });
         updatePauseButton();
 
-        recordButton.setFont(small);
-        recordButton.setFocusPainted(false);
+        styleButton(recordButton, small);
         recordButton.setEnabled(control != null);
         recordButton.addActionListener(e -> onRecordToggled());
         updateRecordButton();
@@ -255,6 +255,26 @@ public final class OverlayWindow implements TranscriptView {
         bar.add(Box.createHorizontalGlue());
         bar.add(statusLabel);
         return bar;
+    }
+
+    /**
+     * Делает кнопку плоской и тёмной под цвет панели.
+     * <p>
+     * По умолчанию macOS рисует кнопку на светлой подложке, и светлый текст на
+     * ней не читается. Простая смена цвета текста не помогает: подложку задаёт
+     * оформление системы, поэтому её отключаем и красим сами.
+     */
+    private static void styleButton(JButton button, Font font) {
+        button.setFont(font);
+        button.setFocusPainted(false);
+        button.setBorderPainted(false);
+        button.setContentAreaFilled(false);
+        button.setOpaque(true);
+        button.setBackground(BUTTON);
+        button.setForeground(TEXT);
+        button.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(BUTTON_EDGE, 1, true),
+                BorderFactory.createEmptyBorder(4, 12, 4, 12)));
     }
 
     private JScrollPane buildTranscript(Config config) {
@@ -362,7 +382,7 @@ public final class OverlayWindow implements TranscriptView {
             recordButton.setForeground(RECORDING);
         } else {
             recordButton.setText("○ записать звук");
-            recordButton.setForeground(MUTED);
+            recordButton.setForeground(TEXT);
         }
     }
 
