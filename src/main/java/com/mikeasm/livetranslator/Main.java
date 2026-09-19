@@ -16,7 +16,7 @@ import java.util.concurrent.TimeUnit;
 public final class Main {
 
     /** Версия приложения — попадает в Info.plist значка. */
-    private static final String VERSION = "0.2.5";
+    private static final String VERSION = "0.2.6";
 
     public static void main(String[] args) throws Exception {
         Config parsed = Config.parse(args);
@@ -169,6 +169,9 @@ public final class Main {
             shutdown.countDown();
         }));
 
+        if (!capture.fallbackNotice().isBlank()) {
+            view.status(capture.fallbackNotice());
+        }
         if (glossary != null) {
             System.out.println("Словарь терминов: " + Glossary.plural(glossary.size())
                     + " из " + glossary.path() + " (правки подхватываются на ходу)");

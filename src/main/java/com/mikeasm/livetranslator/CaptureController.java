@@ -25,12 +25,34 @@ public final class CaptureController implements AutoCloseable {
     /** Сглаженный уровень сигнала: нужен, чтобы показывать его в окне. */
     private volatile double level;
 
+    /** Сообщение о том, что пришлось взять не то устройство, которое просили. */
+    private volatile String fallbackNotice = "";
+
     public CaptureController(Config config, Consumer<byte[]> sink)
             throws LineUnavailableException {
         this.config = config;
         this.sink = sink;
-        this.device = config.device;
-        this.capture = open(device);
+
+        // Устройство из настроек может отсутствовать: BlackHole ещё не
+        // установлен, наушники отключены, виртуальный кабель переименован.
+        // Это не повод не запускаться — переходим на устройство по умолчанию
+        // и говорим об этом, а выбрать нужное можно в панели.
+        try {
+            this.device = config.device;
+            this.capture = open(device);
+        } catch (LineUnavailableException e) {
+            if (config.device.isBlank()) throw e;
+            fallbackNotice = "устройство «" + config.device + "» не найдено, "
+                    + "слушаю устройство по умолчанию";
+            System.err.println(fallbackNotice);
+            this.device = "";
+            this.capture = open("");
+        }
+    }
+
+    /** Непустая строка, если при запуске пришлось взять другое устройство. */
+    public String fallbackNotice() {
+        return fallbackNotice;
     }
 
     private AudioCapture open(String name) throws LineUnavailableException {
