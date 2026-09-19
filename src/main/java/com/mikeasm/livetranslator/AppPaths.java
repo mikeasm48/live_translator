@@ -34,11 +34,29 @@ public final class AppPaths {
                 : configDir().resolve("config");
     }
 
-    /** Расшифровки встреч и записи звука. */
+    /**
+     * Расшифровки встреч и записи звука. Папку можно переназначить в настройках:
+     * встречи бывают чувствительные, и держать их в «Документах» хочется не всем.
+     */
     public static Path logsDir() {
+        String chosen = Settings.get("LT_LOGS_DIR");
+        return chosen.isBlank() ? defaultLogsDir() : expand(chosen);
+    }
+
+    public static Path defaultLogsDir() {
         return DEVELOPMENT
                 ? Path.of("logs")
                 : Path.of(System.getProperty("user.home"), "Documents", "LiveTranslator");
+    }
+
+    /** Понимает «~» в пути, введённом руками. */
+    public static Path expand(String path) {
+        String trimmed = path.trim();
+        if (trimmed.equals("~")) return Path.of(System.getProperty("user.home"));
+        if (trimmed.startsWith("~/")) {
+            return Path.of(System.getProperty("user.home"), trimmed.substring(2));
+        }
+        return Path.of(trimmed);
     }
 
     /**

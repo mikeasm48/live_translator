@@ -7,6 +7,7 @@ import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JDialog;
 import javax.swing.JEditorPane;
+import javax.swing.JFileChooser;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
@@ -52,6 +53,7 @@ public final class SettingsDialog {
         JTabbedPane tabs = new JTabbedPane();
         tabs.addTab("Языки", languagesTab(config, onLanguagesChanged));
         tabs.addTab("Доступ", accessTab(config));
+        tabs.addTab("Файлы", filesTab());
         tabs.addTab("Звук из созвона", blackHoleTab());
 
         dialog.setContentPane(tabs);
@@ -65,9 +67,10 @@ public final class SettingsDialog {
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
         panel.setBorder(BorderFactory.createEmptyBorder(16, 18, 16, 18));
 
-        panel.add(note("Отметьте языки, которые звучат на встрече. Язык определяется "
-                + "для каждой фразы отдельно. Лишние языки в списке ухудшают определение, "
-                + "поэтому отмечайте только те, что действительно звучат."));
+        panel.add(note(
+                "Отметьте языки, которые звучат на встрече — язык определяется",
+                "для каждой фразы отдельно. Лишние языки ухудшают определение,",
+                "поэтому отмечайте только те, что действительно звучат."));
         panel.add(Box.createVerticalStrut(12));
 
         List<JCheckBox> boxes = new ArrayList<>();
@@ -121,9 +124,10 @@ public final class SettingsDialog {
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
         panel.setBorder(BorderFactory.createEmptyBorder(16, 18, 16, 18));
 
-        panel.add(note("Ключ хранится в связке ключей macOS — в файле настроек "
-                + "остаётся только команда его чтения. Источник текущего ключа: "
-                + config.credentialOrigin() + "."));
+        panel.add(note(
+                "Ключ хранится в связке ключей macOS — в файле настроек остаётся",
+                "только команда его чтения.",
+                "Источник текущего ключа: " + config.credentialOrigin() + "."));
         panel.add(Box.createVerticalStrut(14));
 
         panel.add(label("Новый API-ключ (AQVN…)"));
@@ -177,6 +181,101 @@ public final class SettingsDialog {
         return panel;
     }
 
+    /** Показывает, где лежат файлы, и позволяет переназначить папку записей. */
+    private static JPanel filesTab() {
+        JPanel panel = new JPanel();
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.setBorder(BorderFactory.createEmptyBorder(16, 18, 16, 18));
+
+        panel.add(note(
+                "Сюда приложение пишет расшифровки встреч и записи звука.",
+                "Папка создаётся сама, если её ещё нет."));
+        panel.add(Box.createVerticalStrut(12));
+
+        JTextField dirField = new JTextField(AppPaths.logsDir().toString());
+        dirField.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+        dirField.setAlignmentX(0);
+        panel.add(label("Расшифровки и записи"));
+        panel.add(dirField);
+        panel.add(Box.createVerticalStrut(8));
+
+        JPanel buttons = new JPanel();
+        buttons.setLayout(new BoxLayout(buttons, BoxLayout.X_AXIS));
+        buttons.setAlignmentX(0);
+
+        JButton choose = new JButton("Выбрать…");
+        choose.addActionListener(e -> {
+            JFileChooser chooser = new JFileChooser(dirField.getText());
+            chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+            chooser.setDialogTitle("Папка для расшифровок и записей");
+            if (chooser.showOpenDialog(panel) == JFileChooser.APPROVE_OPTION) {
+                dirField.setText(chooser.getSelectedFile().getAbsolutePath());
+            }
+        });
+
+        JButton open = new JButton("Открыть в Finder");
+        open.addActionListener(e -> reveal(AppPaths.expand(dirField.getText())));
+
+        JButton reset = new JButton("По умолчанию");
+        reset.addActionListener(e -> dirField.setText(AppPaths.defaultLogsDir().toString()));
+
+        buttons.add(choose);
+        buttons.add(Box.createHorizontalStrut(8));
+        buttons.add(open);
+        buttons.add(Box.createHorizontalStrut(8));
+        buttons.add(reset);
+        buttons.add(Box.createHorizontalGlue());
+        panel.add(buttons);
+
+        panel.add(Box.createVerticalStrut(18));
+        panel.add(label("Настройки и словарь терминов"));
+        JTextField configField = new JTextField(AppPaths.configDir().toString());
+        configField.setEditable(false);
+        configField.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+        configField.setAlignmentX(0);
+        panel.add(configField);
+        panel.add(Box.createVerticalStrut(8));
+        JButton openConfig = new JButton("Открыть в Finder");
+        openConfig.setAlignmentX(0);
+        openConfig.addActionListener(e -> reveal(AppPaths.configDir()));
+        panel.add(openConfig);
+
+        panel.add(Box.createVerticalStrut(18));
+        JButton save = new JButton("Сохранить");
+        save.setAlignmentX(0);
+        save.addActionListener(e -> {
+            java.nio.file.Path dir = AppPaths.expand(dirField.getText());
+            try {
+                java.nio.file.Files.createDirectories(dir);
+            } catch (java.io.IOException ex) {
+                JOptionPane.showMessageDialog(null, "Не удалось создать папку:\n" + ex.getMessage());
+                return;
+            }
+            // Пустое значение возвращает путь по умолчанию, а не пишет его в файл:
+            // так настройка переживёт переезд домашнего каталога.
+            if (dir.equals(AppPaths.defaultLogsDir())) {
+                Settings.save("LT_LOGS_DIR", "");
+            } else {
+                Settings.save("LT_LOGS_DIR", dir.toString());
+            }
+            JOptionPane.showMessageDialog(null,
+                    "Сохранено.\nЗаписи звука пойдут туда сразу, расшифровка — "
+                            + "со следующего запуска.");
+        });
+        panel.add(save);
+        panel.add(Box.createVerticalGlue());
+        return panel;
+    }
+
+    private static void reveal(java.nio.file.Path path) {
+        try {
+            java.nio.file.Files.createDirectories(path);
+            new ProcessBuilder("open", path.toString()).start();
+        } catch (java.io.IOException ex) {
+            JOptionPane.showMessageDialog(null, "Не удалось открыть папку: " + ex.getMessage());
+        }
+    }
+
     private static JScrollPane blackHoleTab() {
         JEditorPane pane = new JEditorPane("text/html", """
                 <html><body style="font-family:-apple-system,Helvetica;font-size:12px;
@@ -226,8 +325,12 @@ public final class SettingsDialog {
         return label;
     }
 
-    private static JLabel note(String text) {
-        JLabel label = new JLabel("<html><body style='width:540px'>" + text + "</body></html>");
+    /**
+     * Пояснение над полями. Переносы задаются явно: ограничение ширины через
+     * стиль HTML в Swing не срабатывает, и длинная строка уезжает за край.
+     */
+    private static JLabel note(String... lines) {
+        JLabel label = new JLabel("<html>" + String.join("<br>", lines) + "</html>");
         label.setFont(label.getFont().deriveFont(Font.PLAIN, 12f));
         label.setAlignmentX(0);
         return label;
