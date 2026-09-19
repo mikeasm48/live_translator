@@ -40,13 +40,19 @@ public final class AppBundle {
 
             Path bundle = Path.of(System.getProperty("user.home"), "Applications", NAME + ".app");
             Path launcher = bundle.resolve("Contents/MacOS/live-translator");
+            Path plistFile = bundle.resolve("Contents/Info.plist");
             String script = launcherScript(jar);
+            String plist = plist(version);
 
-            // Переписываем только при изменениях: путь к jar или версия Java
-            // могли поменяться после обновления.
-            if (Files.exists(launcher) && script.equals(Files.readString(launcher))) return;
+            // Переписываем при любом расхождении: поменяться могли и пути после
+            // обновления, и сам состав Info.plist в новой версии приложения.
+            if (Files.exists(launcher) && Files.exists(plistFile)
+                    && script.equals(Files.readString(launcher))
+                    && plist.equals(Files.readString(plistFile))) {
+                return;
+            }
 
-            create(bundle, jar, version, script);
+            create(bundle, jar, plist, script);
             System.out.println("Приложение добавлено в «Программы»: " + bundle);
         } catch (IOException | URISyntaxException e) {
             // Значок — удобство, а не условие работы: молча продолжаем.
@@ -54,7 +60,7 @@ public final class AppBundle {
         }
     }
 
-    private static void create(Path bundle, Path jar, String version, String script)
+    private static void create(Path bundle, Path jar, String plist, String script)
             throws IOException {
         Files.createDirectories(bundle.resolve("Contents/MacOS"));
         Files.createDirectories(bundle.resolve("Contents/Resources"));
@@ -66,8 +72,7 @@ public final class AppBundle {
             }
         }
 
-        Files.writeString(bundle.resolve("Contents/Info.plist"), plist(version),
-                StandardCharsets.UTF_8);
+        Files.writeString(bundle.resolve("Contents/Info.plist"), plist, StandardCharsets.UTF_8);
 
         Path launcher = bundle.resolve("Contents/MacOS/live-translator");
         Files.writeString(launcher, script, StandardCharsets.UTF_8);
@@ -112,6 +117,16 @@ public final class AppBundle {
                   <key>CFBundleVersion</key><string>%s</string>
                   <key>LSMinimumSystemVersion</key><string>12.0</string>
                   <key>NSHighResolutionCapable</key><true/>
+                  <!-- Исполняемый файл значка — скрипт, а не бинарник, и
+                       архитектуру из него система прочитать не может: без этих
+                       двух ключей она считает приложение Intel-овым и просит
+                       поставить Rosetta. -->
+                  <key>LSRequiresNativeExecution</key><true/>
+                  <key>LSArchitecturePriority</key>
+                  <array>
+                    <string>arm64</string>
+                    <string>x86_64</string>
+                  </array>
                   <key>NSMicrophoneUsageDescription</key>
                   <string>Приложение слушает микрофон или виртуальный аудиокабель, чтобы переводить речь.</string>
                 </dict>
