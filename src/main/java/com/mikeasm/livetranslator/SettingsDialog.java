@@ -147,6 +147,9 @@ public final class SettingsDialog {
         JCheckBox eouHigh = new JCheckBox("чаще резать фразы", config.eouHigh());
         JCheckBox literature = new JCheckBox("расставлять знаки препинания", config.literature());
         JCheckBox useLlm = new JCheckBox("переводить языковой моделью", config.useLlm());
+        JCheckBox vadAuto = new JCheckBox("подбирать порог тишины автоматически", config.vadAuto());
+        vadAuto.addActionListener(e -> vad.setEnabled(!vadAuto.isSelected()));
+        vad.setEnabled(!config.vadAuto());
 
         panel.add(row("Пауза между словами, мс", pause,
                 "после неё фраза считается законченной"));
@@ -160,7 +163,7 @@ public final class SettingsDialog {
                 "главный вклад в задержку"));
         panel.add(row("Модель перевода", model, "например yandexgpt/latest"));
 
-        for (JCheckBox box : new JCheckBox[]{eouHigh, literature, useLlm}) {
+        for (JCheckBox box : new JCheckBox[]{vadAuto, eouHigh, literature, useLlm}) {
             box.setAlignmentX(0);
             panel.add(box);
         }
@@ -178,7 +181,8 @@ public final class SettingsDialog {
                         eouHigh.isSelected(),
                         literature.isSelected(),
                         Integer.parseInt(maxPhrase.getText().trim()),
-                        Double.parseDouble(vad.getText().trim()));
+                        Double.parseDouble(vad.getText().trim()),
+                        vadAuto.isSelected());
                 config.setTranslationTuning(
                         Integer.parseInt(mergeWords.getText().trim()),
                         Long.parseLong(mergeQuiet.getText().trim()),
@@ -198,6 +202,8 @@ public final class SettingsDialog {
             pause.setText(String.valueOf(config.pauseMs()));
             maxPhrase.setText(String.valueOf(config.maxPhraseSeconds()));
             vad.setText(String.valueOf((int) config.vadThreshold()));
+            vadAuto.setSelected(config.vadAuto());
+            vad.setEnabled(!config.vadAuto());
             mergeWords.setText(String.valueOf(config.mergeWords()));
             mergeQuiet.setText(String.valueOf(config.mergeQuietMs()));
             model.setText(config.llmModel());

@@ -26,6 +26,7 @@ public final class Config {
     public static final boolean DEFAULT_LITERATURE = true;
     public static final int DEFAULT_MAX_PHRASE_SECONDS = 25;
     public static final double DEFAULT_VAD_THRESHOLD = 180;
+    public static final boolean DEFAULT_VAD_AUTO = true;
     public static final int DEFAULT_MERGE_WORDS = 14;
     public static final long DEFAULT_MERGE_QUIET_MS = 1800;
     public static final boolean DEFAULT_USE_LLM = true;
@@ -34,7 +35,7 @@ public final class Config {
     /** Имена настроек, которые правятся в окне и сбрасываются одной кнопкой. */
     private static final String[] TUNING_KEYS = {
             "LT_PAUSE_MS", "LT_EOU_HIGH", "LT_LITERATURE", "LT_MAX_PHRASE",
-            "LT_VAD_THRESHOLD", "LT_MERGE_WORDS", "LT_MERGE_QUIET_MS",
+            "LT_VAD_THRESHOLD", "LT_VAD_AUTO", "LT_MERGE_WORDS", "LT_MERGE_QUIET_MS",
             "LT_LLM", "LT_LLM_MODEL",
     };
 
@@ -65,6 +66,8 @@ public final class Config {
     public final boolean vadEnabled;
     /** Порог RMS (0..32767), ниже которого фрагмент считается тишиной. */
     private volatile double vadThreshold;
+    /** Подбирать порог тишины по собственному шуму источника. */
+    private volatile boolean vadAuto;
     public final int fontSize;
     public final boolean translate;
     /** Пауза между словами, после которой фраза считается законченной, мс. */
@@ -110,6 +113,8 @@ public final class Config {
         this.showUi = !a.containsKey("no-ui");
         this.showSource = Boolean.parseBoolean(settingOr("LT_SHOW_SOURCE", "false"));
         this.vadEnabled = !a.containsKey("no-vad");
+        this.vadAuto = !a.containsKey("vad-threshold")
+                && Boolean.parseBoolean(settingOr("LT_VAD_AUTO", String.valueOf(DEFAULT_VAD_AUTO)));
         this.vadThreshold = Double.parseDouble(a.getOrDefault("vad-threshold",
                 settingOr("LT_VAD_THRESHOLD", String.valueOf(DEFAULT_VAD_THRESHOLD))));
         this.fontSize = Integer.parseInt(a.getOrDefault("font-size", "20"));
@@ -169,6 +174,10 @@ public final class Config {
         return vadThreshold;
     }
 
+    public boolean vadAuto() {
+        return vadAuto;
+    }
+
     public int pauseMs() {
         return pauseMs;
     }
@@ -203,7 +212,10 @@ public final class Config {
 
     /** Применяет и запоминает настройки распознавания. */
     public void setRecognitionTuning(int pauseMs, boolean eouHigh, boolean literature,
-                                     int maxPhraseSeconds, double vadThreshold) {
+                                     int maxPhraseSeconds, double vadThreshold,
+                                     boolean vadAuto) {
+        this.vadAuto = vadAuto;
+        Settings.save("LT_VAD_AUTO", String.valueOf(vadAuto));
         this.pauseMs = pauseMs;
         this.eouHigh = eouHigh;
         this.literature = literature;
@@ -242,6 +254,7 @@ public final class Config {
         this.literature = DEFAULT_LITERATURE;
         this.maxPhraseSeconds = DEFAULT_MAX_PHRASE_SECONDS;
         this.vadThreshold = DEFAULT_VAD_THRESHOLD;
+        this.vadAuto = DEFAULT_VAD_AUTO;
         this.mergeWords = DEFAULT_MERGE_WORDS;
         this.mergeQuietMs = DEFAULT_MERGE_QUIET_MS;
         this.useLlm = DEFAULT_USE_LLM;

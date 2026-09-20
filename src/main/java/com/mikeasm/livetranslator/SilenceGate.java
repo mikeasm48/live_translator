@@ -15,7 +15,15 @@ public final class SilenceGate {
     /** Глубина буфера предзаписи. */
     private static final int PREROLL_CHUNKS = 3;
 
+    /** Ниже этого уровня речи не бывает ни на одном источнике. */
+    private static final double FLOOR_MINIMUM = 25;
+    /** Во сколько раз речь должна превышать собственный шум источника. */
+    private static final double SPEECH_OVER_NOISE = 3.0;
+
     private final Config config;
+    /** Оценка собственного шума источника: быстро вниз, очень медленно вверх. */
+    private volatile double noiseFloor = FLOOR_MINIMUM;
+    private volatile double effectiveThreshold = FLOOR_MINIMUM * SPEECH_OVER_NOISE;
     private final byte[][] preroll = new byte[PREROLL_CHUNKS][];
     private int prerollSize;
     private int quietStreak;
@@ -35,8 +43,8 @@ public final class SilenceGate {
     public record Silence(int durationMs) implements Decision {}
 
     public Decision offer(byte[] chunk) {
-        // Порог читается при каждом фрагменте: его крутят в настройках на ходу.
-        boolean loud = rms(chunk) >= config.vadThreshold();
+        double level = rms(chunk);
+        boolean loud = level >= threshold(level);
         if (loud) {
             quietStreak = 0;
             if (!speaking) {
@@ -70,6 +78,36 @@ public final class SilenceGate {
             prerollSize--;
         }
         preroll[prerollSize++] = chunk;
+    }
+
+    /**
+     * Порог, ниже которого фрагмент считается тишиной.
+     * <p>
+     * Фиксированное значение не годится сразу для двух источников. Микрофон
+     * всегда шумит сам, и порог должен быть выше этого шума. Цифровой кабель
+     * не шумит вовсе, зато громкость в нём зависит от того, насколько громко
+     * играет источник, — тихое видео давало уровень втрое ниже порога,
+     * подобранного по микрофону, и речь целиком уходила как тишина.
+     * <p>
+     * Поэтому порог считается от собственного шума источника. Оценка шума
+     * опускается быстро и поднимается очень медленно: иначе затянувшаяся речь
+     * сама себя примет за шум и порог уползёт вверх.
+     */
+    private double threshold(double level) {
+        if (!config.vadAuto()) return config.vadThreshold();
+
+        if (level < noiseFloor) {
+            noiseFloor = level;
+        } else if (!speaking) {
+            noiseFloor += (level - noiseFloor) * 0.0005;
+        }
+        effectiveThreshold = Math.max(FLOOR_MINIMUM, noiseFloor * SPEECH_OVER_NOISE + 10);
+        return effectiveThreshold;
+    }
+
+    /** Порог, действующий сейчас, — его показывает полоска уровня. */
+    public double currentThreshold() {
+        return config.vadAuto() ? effectiveThreshold : config.vadThreshold();
     }
 
     /** Истина, если сейчас идёт речь: используется, чтобы не рвать поток на фразе. */

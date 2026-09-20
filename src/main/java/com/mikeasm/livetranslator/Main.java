@@ -16,7 +16,7 @@ import java.util.concurrent.TimeUnit;
 public final class Main {
 
     /** Версия приложения — попадает в Info.plist значка. */
-    private static final String VERSION = "0.3.3";
+    private static final String VERSION = "0.3.4";
 
     public static void main(String[] args) throws Exception {
         Config parsed = Config.parse(args);
@@ -73,7 +73,7 @@ public final class Main {
 
         List<TranscriptView> views = new ArrayList<>();
         views.add(new ConsoleView());
-        if (config.showUi) views.add(OverlayWindow.create(config, controlFor(capture, config.vadThreshold(), sessionRef)));
+        if (config.showUi) views.add(OverlayWindow.create(config, controlFor(capture, gate, sessionRef)));
         SessionLog log = new SessionLog(AppPaths.logsDir());
         views.add(log);
         TranscriptView view = fanOut(views);
@@ -242,7 +242,7 @@ public final class Main {
     }
 
     /** Переходник между окном и управлением захватом. */
-    private static OverlayWindow.Control controlFor(CaptureController capture, double threshold,
+    private static OverlayWindow.Control controlFor(CaptureController capture, SilenceGate gate,
                                                     AtomicReference<RecognizerSession> sessionRef) {
         return new OverlayWindow.Control() {
             @Override
@@ -287,7 +287,8 @@ public final class Main {
 
             @Override
             public double silenceThreshold() {
-                return threshold;
+                // Порог может подбираться на ходу — показываем действующий.
+                return gate == null ? Config.DEFAULT_VAD_THRESHOLD : gate.currentThreshold();
             }
 
             @Override
