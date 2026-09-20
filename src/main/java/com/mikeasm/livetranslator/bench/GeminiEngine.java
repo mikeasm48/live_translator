@@ -1,6 +1,7 @@
 package com.mikeasm.livetranslator.bench;
 
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.mikeasm.livetranslator.Config;
@@ -137,16 +138,42 @@ public final class GeminiEngine implements AsrEngine {
     }
 
     /**
-     * Текст ответа. Если поля нет, дальше гадать бессмысленно — показываем, что
-     * на самом деле прислали: имена моделей и вид ответа у Gemini меняются, и
-     * молчаливый пустой результат в отчёте хуже понятной ошибки.
+     * Текст ответа.
+     * <p>
+     * Ответ приходит списком шагов: сначала размышления модели, потом сам
+     * результат. Берём только шаги {@code model_output} — размышления в
+     * расшифровку попадать не должны.
+     * <p>
+     * Если текста не нашлось, дальше гадать бессмысленно: показываем, что
+     * сервис прислал на самом деле. Имена моделей и вид ответа у Gemini
+     * меняются, и молчаливый пустой результат в отчёте хуже понятной ошибки.
      */
     private static String answer(String body) throws IOException {
         JsonObject root = JsonParser.parseString(body).getAsJsonObject();
+        // На случай, если очередная ревизия API вернётся к плоскому полю.
         if (root.has("output_text")) return ElevenLabsEngine.text(root, "output_text");
+
+        StringBuilder text = new StringBuilder();
+        if (root.has("steps") && root.get("steps").isJsonArray()) {
+            for (JsonElement element : root.getAsJsonArray("steps")) {
+                if (!element.isJsonObject()) continue;
+                JsonObject step = element.getAsJsonObject();
+                if (!"model_output".equals(ElevenLabsEngine.text(step, "type"))) continue;
+                if (!step.has("content") || !step.get("content").isJsonArray()) continue;
+                for (JsonElement part : step.getAsJsonArray("content")) {
+                    if (!part.isJsonObject()) continue;
+                    JsonObject piece = part.getAsJsonObject();
+                    if (!"text".equals(ElevenLabsEngine.text(piece, "type"))) continue;
+                    if (!text.isEmpty()) text.append('\n');
+                    text.append(ElevenLabsEngine.text(piece, "text"));
+                }
+            }
+        }
+        if (!text.isEmpty()) return text.toString();
+
         String keys = String.join(", ", root.keySet());
         String snippet = body.length() > 300 ? body.substring(0, 300) + "…" : body;
-        throw new IOException("в ответе нет output_text (поля: " + keys + "): " + snippet);
+        throw new IOException("в ответе нет текста (поля: " + keys + "): " + snippet);
     }
 
     /**
