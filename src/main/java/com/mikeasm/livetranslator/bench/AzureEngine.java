@@ -68,7 +68,7 @@ public final class AzureEngine implements AsrEngine {
     public String title() {
         if (withPhrases) {
             return "Azure AI Speech, быстрая расшифровка с подсказкой терминов ("
-                    + phrases().size() + ")";
+                    + Terms.expected(config).size() + ")";
         }
         return fast
                 ? "Azure AI Speech, быстрая расшифровка"
@@ -119,7 +119,7 @@ public final class AzureEngine implements AsrEngine {
         definition.add("locales", locales);
         definition.addProperty("profanityFilterMode", "None");
         if (withPhrases) {
-            List<String> terms = phrases();
+            List<String> terms = Terms.expected(config);
             if (!terms.isEmpty()) {
                 JsonArray list = new JsonArray();
                 for (String term : terms) list.add(term);
@@ -189,29 +189,6 @@ public final class AzureEngine implements AsrEngine {
             }
         }
         return text.isBlank() ? List.of() : List.of(new Transcript.Segment(0, text, locale));
-    }
-
-    /**
-     * Термины, которые стоит ожидать в речи: словарь приложения плюс всё, что
-     * добавлено в {@code LT_AZURE_PHRASES} через запятую.
-     * <p>
-     * Словарь приложения составлялся для перевода, а не для распознавания, и
-     * покрывает не всё — поэтому список можно дополнить, не трогая словарь.
-     */
-    private List<String> phrases() {
-        java.util.LinkedHashSet<String> terms = new java.util.LinkedHashSet<>();
-        try {
-            com.mikeasm.livetranslator.Glossary.load(
-                            java.nio.file.Path.of(config.glossaryPath), false)
-                    .ifPresent(glossary -> terms.addAll(glossary.sourceTerms()));
-        } catch (Exception e) {
-            System.err.println("   словарь для подсказки не прочитан: " + e.getMessage());
-        }
-        for (String extra : Settings.get("LT_AZURE_PHRASES").split(",")) {
-            String term = extra.trim();
-            if (!term.isEmpty()) terms.add(term);
-        }
-        return List.copyOf(terms);
     }
 
     /** Список языков для Azure: коды там полные, как у нас. */
