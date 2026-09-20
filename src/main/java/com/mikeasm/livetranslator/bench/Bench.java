@@ -299,6 +299,8 @@ public final class Bench {
                   google          Cloud STT v2 / Chirp       LT_GOOGLE_PROJECT и
                                                              LT_GOOGLE_TOKEN_CMD=gcloud auth print-access-token
                   azure           быстрая расшифровка        LT_AZURE_KEY + LT_AZURE_REGION
+                  azure-terms     то же с подсказкой         LT_AZURE_KEY + LT_AZURE_PHRASES
+                                  ожидаемых терминов
                   azure-short     запасной путь Azure для    LT_AZURE_KEY + LT_AZURE_REGION
                                   коротких фрагментов; сам
                                   не запускается
