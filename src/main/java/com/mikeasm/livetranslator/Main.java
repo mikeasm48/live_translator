@@ -16,7 +16,8 @@ import java.util.concurrent.TimeUnit;
 public final class Main {
 
     /** Версия приложения — попадает в Info.plist значка. */
-    private static final String VERSION = "0.4.2";
+    /** Версия приложения — попадает в Info.plist значка и в окно настроек. */
+    static final String VERSION = "0.4.2";
 
     public static void main(String[] args) throws Exception {
         Config parsed = Config.parse(args);
@@ -326,6 +327,11 @@ public final class Main {
                     public void status(String message) {
                         view.status(message);
                     }
+
+                    @Override
+                    public void state(String state) {
+                        view.state(state);
+                    }
                 });
 
         sessionRef.set(new Listening() {
@@ -425,6 +431,37 @@ public final class Main {
             return;
         }
 
+        proposeInstall(update);
+    }
+
+    /**
+     * Проверяет обновление по просьбе из настроек.
+     * <p>
+     * Проверка идёт в стороне, а окна показываются в потоке отрисовки: Swing
+     * модальных окон из чужих потоков не прощает.
+     */
+    static void checkForUpdates(Runnable done) {
+        Thread probe = new Thread(() -> {
+            java.util.Optional<Updates.Available> found = Updates.check(VERSION);
+            javax.swing.SwingUtilities.invokeLater(() -> {
+                try {
+                    if (found.isPresent()) {
+                        proposeInstall(found.get());
+                    } else {
+                        javax.swing.JOptionPane.showMessageDialog(null,
+                                "У вас последняя версия: " + VERSION + ".");
+                    }
+                } finally {
+                    done.run();
+                }
+            });
+        }, "updates-manual");
+        probe.setDaemon(true);
+        probe.start();
+    }
+
+    /** Спрашивает и ставит. Вызывается в потоке отрисовки. */
+    private static void proposeInstall(Updates.Available update) {
         int answer = ask("Доступна версия " + update.version() + ", у вас " + VERSION + "."
                 + "\nОбновить сейчас? Приложение закроется и откроется заново.",
                 "Обновление", new String[]{"Обновить", "Позже"});
@@ -740,6 +777,11 @@ public final class Main {
             @Override
             public void status(String message) {
                 views.forEach(v -> safely(() -> v.status(message)));
+            }
+
+            @Override
+            public void state(String state) {
+                views.forEach(v -> safely(() -> v.state(state)));
             }
 
             private void safely(Runnable action) {
