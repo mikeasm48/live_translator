@@ -35,8 +35,9 @@ public final class GeminiSession implements AutoCloseable {
         /**
          * @param original что прозвучало; пусто, если модель не вернула
          * @param text     перевод
+         * @param spokenAt когда эту реплику произнесли
          */
-        void line(long id, String original, String text);
+        void line(long id, String original, String text, java.time.LocalTime spokenAt);
 
         void status(String message);
     }
@@ -79,6 +80,17 @@ public final class GeminiSession implements AutoCloseable {
      */
     private static final int MAX_EXTENSIONS = 2;
 
+    /**
+     * Когда начал набираться нынешний кусок.
+     * <p>
+     * Модель размечает реплики внутри куска, но кусок приходит целиком. Без
+     * этой отметки все его фразы получили бы одно время — время получения, —
+     * хотя между первой и последней прошло десять секунд.
+     */
+    private volatile long bufferStartedAt;
+    /** То же для куска, который уже ушёл в отправку. */
+    private volatile long chunkStartedAt;
+
     /** Сколько миллисекунд подряд стоит тишина. */
     private int silenceRunMs;
     /** Была ли в накопленном хоть какая-то речь: тишину отправлять незачем. */
@@ -97,6 +109,7 @@ public final class GeminiSession implements AutoCloseable {
     public synchronized void offer(byte[] chunk) {
         if (closed || paused) return;
 
+        if (buffer.size() == 0) bufferStartedAt = System.currentTimeMillis();
         if (gate == null) {
             buffer.write(chunk, 0, chunk.length);
             heardSpeech = true;
@@ -134,6 +147,7 @@ public final class GeminiSession implements AutoCloseable {
     }
 
     private byte[] flush() {
+        chunkStartedAt = bufferStartedAt;
         byte[] audio = buffer.toByteArray();
         buffer.reset();
         silenceRunMs = 0;
@@ -146,6 +160,7 @@ public final class GeminiSession implements AutoCloseable {
 
     private void send(byte[] pcm) {
         if (durationMs(pcm.length) < MIN_SEND_MS) return;
+        long startedAt = chunkStartedAt;
         sender.submit(() -> {
             try {
                 List<GeminiClient.Line> lines =
@@ -153,7 +168,8 @@ public final class GeminiSession implements AutoCloseable {
                 for (GeminiClient.Line line : lines) {
                     if (line.text().isBlank()) continue;
                     emit(TextCleanup.collapseRepeats(line.original()),
-                            TextCleanup.collapseRepeats(line.text()));
+                            TextCleanup.collapseRepeats(line.text()),
+                            spokenAt(startedAt, line.startMs()));
                 }
             } catch (Exception e) {
                 String reason = e.getMessage() == null ? e.toString() : e.getMessage();
@@ -173,11 +189,20 @@ public final class GeminiSession implements AutoCloseable {
      * Продолжение уходит под тем же номером: и окно, и расшифровка обновляют
      * строку на месте, вместо того чтобы плодить огрызки.
      */
-    private synchronized void emit(String original, String text) {
+    /** Время реплики: начало куска плюс её смещение внутри него. */
+    private static java.time.LocalTime spokenAt(long chunkStartedAt, int offsetMs) {
+        long at = (chunkStartedAt > 0 ? chunkStartedAt : System.currentTimeMillis())
+                + Math.max(offsetMs, 0);
+        return java.time.Instant.ofEpochMilli(at)
+                .atZone(java.time.ZoneId.systemDefault()).toLocalTime();
+    }
+
+    private synchronized void emit(String original, String text,
+                                   java.time.LocalTime spokenAt) {
         if (openId >= 0) {
             String joinedText = (openText + " " + text).strip();
             String joinedOriginal = (openOriginal + " " + original).strip();
-            listener.line(openId, joinedOriginal, joinedText);
+            listener.line(openId, joinedOriginal, joinedText, spokenAt);
             extensions++;
             if (finished(joinedText) || extensions >= MAX_EXTENSIONS) {
                 openId = -1;
@@ -188,7 +213,7 @@ public final class GeminiSession implements AutoCloseable {
             return;
         }
         long id = nextId.getAndIncrement();
-        listener.line(id, original, text);
+        listener.line(id, original, text, spokenAt);
         if (!finished(text)) {
             openId = id;
             openText = text;

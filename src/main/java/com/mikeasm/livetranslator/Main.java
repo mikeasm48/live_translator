@@ -276,14 +276,15 @@ public final class Main {
         GeminiSession gemini = new GeminiSession(config, client, gate,
                 new GeminiSession.Listener() {
                     @Override
-                    public void line(long id, String original, String text) {
+                    public void line(long id, String original, String text,
+                                     java.time.LocalTime spokenAt) {
                         // Языковой метки у нас здесь нет и взяться ей неоткуда:
                         // модель слушает звук, а не подписывает его языком.
                         if (original.isBlank()) {
-                            view.phrase(id, text, "");
+                            view.phrase(id, text, "", spokenAt);
                             view.translation(id, text, TranslatedBy.SOURCE);
                         } else {
-                            view.phrase(id, original, "");
+                            view.phrase(id, original, "", spokenAt);
                             view.translation(id, text, TranslatedBy.MODEL);
                         }
                     }
@@ -585,6 +586,12 @@ public final class Main {
             @Override
             public void phrase(long id, String source, String language) {
                 views.forEach(v -> safely(() -> v.phrase(id, source, language)));
+            }
+
+            @Override
+            public void phrase(long id, String source, String language,
+                               java.time.LocalTime spokenAt) {
+                views.forEach(v -> safely(() -> v.phrase(id, source, language, spokenAt)));
             }
 
             @Override

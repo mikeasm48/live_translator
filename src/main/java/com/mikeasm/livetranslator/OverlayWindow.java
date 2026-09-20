@@ -438,13 +438,18 @@ public final class OverlayWindow implements TranscriptView {
 
     @Override
     public void phrase(long id, String source, String language) {
+        phrase(id, source, language, LocalTime.now());
+    }
+
+    @Override
+    public void phrase(long id, String source, String language, LocalTime spokenAt) {
         SwingUtilities.invokeLater(() -> {
             int index = indexOf(id);
             if (index >= 0) {
                 Line old = lines.get(index);
                 lines.set(index, new Line(id, old.time(), source, old.translated(), language));
             } else {
-                lines.add(new Line(id, LocalTime.now().format(CLOCK), source, null, language));
+                lines.add(new Line(id, spokenAt.format(CLOCK), source, null, language));
                 if (lines.size() > MAX_LINES) lines.remove(0);
             }
             partialArea.setText(" ");
