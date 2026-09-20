@@ -13,6 +13,7 @@ public final class YandexGrpc {
 
     public static final String STT_ENDPOINT = "stt.api.cloud.yandex.net";
     public static final String TRANSLATE_ENDPOINT = "translate.api.cloud.yandex.net";
+    public static final String LLM_ENDPOINT = "llm.api.cloud.yandex.net";
     private static final int PORT = 443;
 
     private static final Metadata.Key<String> AUTHORIZATION =

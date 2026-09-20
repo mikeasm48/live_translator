@@ -16,7 +16,7 @@ import java.util.concurrent.TimeUnit;
 public final class Main {
 
     /** Версия приложения — попадает в Info.plist значка. */
-    private static final String VERSION = "0.2.7";
+    private static final String VERSION = "0.3.0";
 
     public static void main(String[] args) throws Exception {
         Config parsed = Config.parse(args);
@@ -78,14 +78,26 @@ public final class Main {
         views.add(log);
         TranscriptView view = fanOut(views);
 
+        AtomicReference<Translator> translatorRef = new AtomicReference<>();
+        PhraseBuffer phrases = new PhraseBuffer(config.mergeWords, config.mergeQuietMs,
+                (id, text, lang) -> showAndTranslate(view, translatorRef.get(), config,
+                        id, text, lang));
+
         ManagedChannel sttChannel = YandexGrpc.channel(YandexGrpc.STT_ENDPOINT, config);
         ManagedChannel translateChannel = config.translate
                 ? YandexGrpc.channel(YandexGrpc.TRANSLATE_ENDPOINT, config)
                 : null;
         Glossary glossary = loadGlossary(config);
+        ManagedChannel llmChannel = config.translate && config.useLlm
+                ? YandexGrpc.channel(YandexGrpc.LLM_ENDPOINT, config)
+                : null;
+        LlmTranslator llm = llmChannel == null
+                ? null
+                : new LlmTranslator(llmChannel, config, glossary);
         Translator translator = translateChannel == null
                 ? null
-                : new Translator(translateChannel, config, glossary, view::status);
+                : new Translator(translateChannel, config, glossary, view::status, llm);
+        translatorRef.set(translator);
 
         RecognizerSession session = new RecognizerSession(sttChannel, config,
                 new SpeechKitStream.Listener() {
@@ -100,26 +112,13 @@ public final class Main {
                         // распознавание переводчик усиливает многократно.
                         String clean = TextCleanup.collapseRepeats(text);
                         String lang = language.isBlank() ? config.primaryLang() : language;
-                        view.phrase(index, clean, lang);
-
-                        if (translator == null) return;
-                        if (isTargetLanguage(lang, config.targetLang)) {
-                            // Говорят на языке перевода — переводить нечего.
-                            // Лишний вызов стоил бы денег и портил бы текст.
-                            view.translation(index, clean);
-                            return;
-                        }
-                        translator.translate(clean, lang,
-                                ru -> view.translation(index, TextCleanup.collapseRepeats(ru)),
-                                error -> view.status("перевод не удался: " + error));
+                        phrases.add(clean, lang);
                     }
 
                     @Override
                     public void onRefinement(long index, String text, String language) {
-                        // Уточнённый текст приходит после финала: обновляем строку,
-                        // а перевод не перезапрашиваем — он уже в пути или показан.
-                        view.phrase(index, TextCleanup.collapseRepeats(text),
-                                language.isBlank() ? config.primaryLang() : language);
+                        // При склейке фраз уточнение привязать не к чему: кусок
+                        // уже мог уйти на перевод вместе с соседями.
                     }
 
                     @Override
@@ -156,12 +155,16 @@ public final class Main {
             // Каждый шаг изолирован: сбой одного не должен отменять остальные.
             // Лог закрывается до звука — он ценнее, а звуковая линия капризнее.
             quietly("закрытие потока распознавания", session::stop);
+            // Недоговорённый кусок тоже нужно перевести, иначе конец встречи
+            // потеряется вместе с буфером.
+            quietly("последняя фраза", phrases::close);
             quietly("остановка перевода", () -> {
                 if (translator != null) translator.close();
             });
             quietly("закрытие соединений", () -> {
                 sttChannel.shutdown();
                 if (translateChannel != null) translateChannel.shutdown();
+                if (llmChannel != null) llmChannel.shutdown();
                 sttChannel.awaitTermination(2, TimeUnit.SECONDS);
             });
             quietly("сохранение лога", log::close);
@@ -308,6 +311,27 @@ public final class Main {
         };
     }
 
+    /**
+     * Показывает готовый кусок и отправляет его на перевод.
+     * <p>
+     * Реплика появляется на экране сразу, а перевод заменяет её, когда придёт:
+     * так видно, что происходит, пока модель думает.
+     */
+    private static void showAndTranslate(TranscriptView view, Translator translator,
+                                         Config config, long id, String text, String lang) {
+        view.phrase(id, text, lang);
+        if (translator == null) return;
+        if (isTargetLanguage(lang, config.targetLang)) {
+            // Говорят на языке перевода — переводить нечего. Лишний вызов
+            // стоил бы денег и портил бы формулировки.
+            view.translation(id, text);
+            return;
+        }
+        translator.translate(text, lang,
+                ru -> view.translation(id, TextCleanup.collapseRepeats(ru)),
+                error -> view.status("перевод не удался: " + error));
+    }
+
     /** Совпадает ли определённый язык с языком перевода: uz-UZ против ru. */
     private static boolean isTargetLanguage(String detected, String target) {
         return detected.split("-")[0].equalsIgnoreCase(target.split("-")[0]);
@@ -437,6 +461,9 @@ public final class Main {
                   --rate=16000          частота дискретизации
                   --no-ui               без окна, только терминал
                   --no-translate        только расшифровка, без перевода
+                  --no-llm              переводить обычным переводчиком, без модели
+                  --merge-words=14      сколько слов копить перед переводом
+                  --merge-quiet=1800    сколько ждать продолжения фразы, мс
                   --glossary=путь       словарь терминов (по умолчанию ./glossary.txt)
                   --try="фраза"         перевести фразу без словаря и со словарём
                   --pause=600           пауза (мс), после которой фраза считается законченной

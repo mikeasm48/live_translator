@@ -321,6 +321,10 @@ SpeechKit определяет язык **для каждой фразы отд�
 | `LT_TARGET` | язык перевода | `ru` |
 | `LT_SHOW_SOURCE` | показывать оригинал под переводом | `false` |
 | `LT_LOGS_DIR` | папка расшифровок и записей | `~/Documents/LiveTranslator` |
+| `LT_LLM` | переводить языковой моделью | `true` |
+| `LT_LLM_MODEL` | модель для перевода | `yandexgpt/latest` |
+| `LT_MERGE_WORDS` | сколько слов копить перед переводом | `14` |
+| `LT_MERGE_QUIET_MS` | сколько ждать продолжения фразы | `1800` |
 
 ## 11. Как устроено
 
@@ -338,8 +342,12 @@ RecognizerSession держит распознавание живым: у пот�
 SpeechKitStream   gRPC Recognizer/RecognizeStreaming: partial → final →
                   final_refinement
    ↓
-Translator        Translate v2 в отдельном пуле, чтобы сеть не тормозила звук;
-                  к каждому запросу подцепляется словарь терминов
+PhraseBuffer      копит фразы до осмысленного куска: обрывок в четыре слова
+                  переводить бессмысленно, переводчик додумает за вас
+   ↓
+LlmTranslator     YandexGPT с контекстом последних реплик и словарём терминов;
+                  узнаёт искажённые распознаванием названия по окружению.
+                  При сбое — обычный Translate v2, встреча не остаётся без текста
    ↓
 TranscriptView    ConsoleView + OverlayWindow + SessionLog
 ```

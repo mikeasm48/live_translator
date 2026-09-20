@@ -144,6 +144,15 @@ public final class Glossary {
         return TranslateGlossaryConfig.newBuilder().setGlossaryData(data).build();
     }
 
+    /** Термины списком — для подсказки языковой модели. */
+    public String asPromptList() {
+        StringBuilder text = new StringBuilder();
+        for (Pair pair : pairs) {
+            text.append("- ").append(pair.source()).append(" → ").append(pair.target()).append('\n');
+        }
+        return text.toString();
+    }
+
     /** Склонение слова «пара» по числу: 1 пара, 2 пары, 5 пар. */
     public static String plural(int count) {
         int tail = count % 100;

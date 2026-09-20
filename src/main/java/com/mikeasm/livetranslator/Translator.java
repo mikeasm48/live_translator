@@ -26,13 +26,21 @@ public final class Translator implements AutoCloseable {
     private final Config config;
     private final Glossary glossary;
     private final Consumer<String> statusSink;
+    /** Если задан, перевод идёт через языковую модель, а этот — запасной. */
+    private final LlmTranslator llm;
 
     public Translator(ManagedChannel channel, Config config,
                       Glossary glossary, Consumer<String> statusSink) {
+        this(channel, config, glossary, statusSink, null);
+    }
+
+    public Translator(ManagedChannel channel, Config config, Glossary glossary,
+                      Consumer<String> statusSink, LlmTranslator llm) {
         this.stub = TranslationServiceGrpc.newBlockingStub(channel);
         this.config = config;
         this.glossary = glossary;
         this.statusSink = statusSink;
+        this.llm = llm;
     }
 
     /**
@@ -69,6 +77,21 @@ public final class Translator implements AutoCloseable {
     public void translate(String text, String sourceLang,
                           Consumer<String> callback, Consumer<String> onError) {
         pool.submit(() -> {
+            // Языковая модель — основной путь, но сбой в ней не должен оставлять
+            // встречу без перевода: тогда работает обычный переводчик.
+            if (llm != null) {
+                try {
+                    String answer = llm.translate(text, sourceLang);
+                    if (answer != null && !answer.isBlank()) {
+                        callback.accept(answer);
+                        return;
+                    }
+                    statusSink.accept("модель не ответила, перевожу обычным способом");
+                } catch (RuntimeException e) {
+                    statusSink.accept("модель недоступна (" + shortMessage(e)
+                            + "), перевожу обычным способом");
+                }
+            }
             try {
                 TranslateRequest.Builder request = TranslateRequest.newBuilder()
                         .setSourceLanguageCode(shortCode(sourceLang))
@@ -92,6 +115,12 @@ public final class Translator implements AutoCloseable {
                 onError.accept(e.getMessage() == null ? e.toString() : e.getMessage());
             }
         });
+    }
+
+    private static String shortMessage(RuntimeException e) {
+        String message = e.getMessage();
+        if (message == null) return e.getClass().getSimpleName();
+        return message.length() > 80 ? message.substring(0, 80) + "…" : message;
     }
 
     @Override

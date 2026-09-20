@@ -53,6 +53,14 @@ public final class Config {
     public final int maxPhraseSeconds;
     /** Начинать запись звука сразу при старте. */
     public final boolean recordFromStart;
+    /** Переводить языковой моделью: она чинит ошибки распознавания по контексту. */
+    public final boolean useLlm;
+    public final String llmModel;
+    public final int llmTimeoutSeconds;
+    /** Сколько слов копить перед отправкой на перевод. */
+    public final int mergeWords;
+    /** Сколько ждать продолжения фразы, мс. */
+    public final long mergeQuietMs;
     /** Путь к файлу словаря терминов. */
     public final String glossaryPath;
     /** Истина, если путь задан пользователем: тогда отсутствие файла — ошибка. */
@@ -85,6 +93,14 @@ public final class Config {
         this.eouHigh = !a.containsKey("eou-default");
         this.maxPhraseSeconds = Integer.parseInt(a.getOrDefault("max-phrase", "25"));
         this.recordFromStart = a.containsKey("record");
+        this.useLlm = !a.containsKey("no-llm")
+                && Boolean.parseBoolean(settingOr("LT_LLM", "true"));
+        this.llmModel = settingOr("LT_LLM_MODEL", "yandexgpt/latest");
+        this.llmTimeoutSeconds = Integer.parseInt(a.getOrDefault("llm-timeout", "20"));
+        this.mergeWords = Integer.parseInt(a.getOrDefault("merge-words",
+                settingOr("LT_MERGE_WORDS", "14")));
+        this.mergeQuietMs = Long.parseLong(a.getOrDefault("merge-quiet",
+                settingOr("LT_MERGE_QUIET_MS", "1800")));
         // Проверено на живой речи: с нормализацией перевод заметно связнее,
         // потому что переводчик видит границы предложений.
         this.literature = !a.containsKey("no-literature");
