@@ -36,8 +36,12 @@ public final class BenchReport {
         this.windowMs = windowMs;
     }
 
-    /** Результат одного движка: что услышал, что из этого вышло по-русски, и цена ошибки. */
-    public record Outcome(Transcript asr, Transcript russian, Wer.Score score, String skipped) {}
+    /**
+     * Результат одного движка: что услышал, что из этого вышло по-русски, и
+     * цена ошибки. {@code direct} — движок выдал перевод сам, минуя расшифровку.
+     */
+    public record Outcome(Transcript asr, Transcript russian, Wer.Score score, String skipped,
+                          boolean direct) {}
 
     public Path write(List<Outcome> outcomes) throws IOException {
         Files.createDirectories(directory);
@@ -94,11 +98,18 @@ public final class BenchReport {
                     .append(seconds(asr.elapsedMs())).append(" | ")
                     .append(outcome.score() == null ? "—" : outcome.score().werLabel()).append(" | ")
                     .append(outcome.score() == null ? "—" : outcome.score().cerLabel()).append(" | ")
-                    .append(languages(asr)).append(" |\n");
+                    .append(outcome.direct() ? "перевод прямо из звука" : languages(asr))
+                    .append(" |\n");
         }
         md.append("\nWER — доля ошибочных слов относительно эталона, меньше лучше. ");
         md.append("CER считает то же по буквам: для узбекского он честнее, ");
         md.append("потому что не записывает в полный промах слово с неверным окончанием.\n\n");
+        if (outcomes.stream().anyMatch(Outcome::direct)) {
+            md.append("У движков, переводящих прямо из звука, WER пуст намеренно: ");
+            md.append("эталон выправлен на языке говорящего, и считать по нему долю ошибок ");
+            md.append("в русском тексте — мерить одно линейкой другого. ");
+            md.append("Их строку читают глазами, а не сравнивают числом.\n\n");
+        }
     }
 
     private static String languages(Transcript asr) {

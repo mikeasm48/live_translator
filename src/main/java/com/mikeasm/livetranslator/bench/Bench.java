@@ -113,7 +113,8 @@ public final class Bench {
         Transcript asr = new Transcript(engine.id(), engine.title());
         if (!engine.skipReason().isBlank()) {
             System.out.println("— " + engine.id() + ": пропускаю, " + engine.skipReason());
-            return new BenchReport.Outcome(asr, null, null, engine.skipReason());
+            return new BenchReport.Outcome(asr, null, null, engine.skipReason(),
+                    engine.alreadyTranslated());
         }
 
         List<AudioFile.Clip> clips = audio.split(chunkLimitMs(engine, chunkSeconds));
@@ -137,16 +138,18 @@ public final class Bench {
         }
         asr.setElapsedMs(System.currentTimeMillis() - startedAt);
 
-        Transcript russian = asr.failed() || llmChannel == null
+        Transcript russian = asr.failed() || llmChannel == null || engine.alreadyTranslated()
                 ? null
                 : translate(asr, config, llmChannel, glossary);
-        Wer.Score score = reference.isBlank() || asr.failed()
+        // Эталон выправлен на языке говорящего, а этот движок сразу выдал
+        // перевод: считать по нему долю ошибок — мерить одно линейкой другого.
+        Wer.Score score = reference.isBlank() || asr.failed() || engine.alreadyTranslated()
                 ? null
                 : Wer.of(reference, asr.text());
         if (score != null) {
             System.out.println("   WER " + score.werLabel() + ", CER " + score.cerLabel());
         }
-        return new BenchReport.Outcome(asr, russian, score, "");
+        return new BenchReport.Outcome(asr, russian, score, "", engine.alreadyTranslated());
     }
 
     /**
@@ -222,15 +225,30 @@ public final class Bench {
         }
     }
 
+    /** Движки, которые запускаются только по явной просьбе. */
+    private static final java.util.Set<String> SPARE = java.util.Set.of("azure-short");
+
     private static List<AsrEngine> engines(Config config, String only) {
         List<AsrEngine> all = List.of(
                 new YandexEngine(config, false),
                 new YandexEngine(config, true),
                 new GoogleEngine(config),
+                new AzureEngine(config, true),
+                new AzureEngine(config, false),
+                new GeminiEngine(config, false),
+                new GeminiEngine(config, true),
                 new ElevenLabsEngine(config),
                 new OpenAiEngine(config),
                 new AssemblyAiEngine(config));
-        if (only.isBlank()) return all;
+        // Запасные движки денег без спроса не тратят: они нужны, только когда
+        // основной путь у вендора почему-то не сработал.
+        if (only.isBlank()) {
+            return all.stream().filter(engine -> {
+                boolean spare = SPARE.contains(engine.id());
+                if (spare) engine.close();
+                return !spare;
+            }).toList();
+        }
 
         List<String> wanted = java.util.Arrays.stream(only.split(","))
                 .map(String::trim).filter(name -> !name.isEmpty()).toList();
@@ -279,6 +297,13 @@ public final class Bench {
                                   модели, FULL_DATA
                   google          Cloud STT v2 / Chirp       LT_GOOGLE_PROJECT и
                                                              LT_GOOGLE_TOKEN_CMD=gcloud auth print-access-token
+                  azure           быстрая расшифровка        LT_AZURE_KEY + LT_AZURE_REGION
+                  azure-short     запасной путь Azure для    LT_AZURE_KEY + LT_AZURE_REGION
+                                  коротких фрагментов; сам
+                                  не запускается
+                  gemini          дословная расшифровка      LT_GEMINI_KEY
+                  gemini-ru       звук сразу в перевод,      LT_GEMINI_KEY
+                                  без текста посередине
                   elevenlabs      Scribe                     LT_ELEVENLABS_KEY
                   openai          Whisper                    LT_OPENAI_KEY
                   assemblyai      отложенное распознавание   LT_ASSEMBLYAI_KEY
