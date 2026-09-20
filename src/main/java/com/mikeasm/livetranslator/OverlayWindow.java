@@ -137,6 +137,8 @@ public final class OverlayWindow implements TranscriptView {
     private final JLabel statusLabel = new JLabel(" ");
     private final LevelBar levelBar = new LevelBar();
     private final JPanel statusLine = new JPanel();
+    /** Что происходит прямо сейчас. В отличие от сообщений, не гаснет. */
+    private final JLabel stateLabel = new JLabel();
     /** Гасит устаревшее сообщение: оно описывает момент, а не состояние. */
     private Timer statusTimer;
     private final JScrollPane scroll = new JScrollPane();
@@ -198,6 +200,9 @@ public final class OverlayWindow implements TranscriptView {
         statusLine.setBackground(new Color(0x23, 0x27, 0x31));
         statusLine.setBorder(BorderFactory.createEmptyBorder(5, 14, 6, 14));
         statusLine.add(statusLabel, BorderLayout.CENTER);
+        stateLabel.setForeground(MUTED);
+        stateLabel.setFont(stateLabel.getFont().deriveFont(java.awt.Font.PLAIN, 11f));
+        statusLine.add(stateLabel, BorderLayout.EAST);
         statusLine.setVisible(false);
         return statusLine;
     }
@@ -413,9 +418,22 @@ public final class OverlayWindow implements TranscriptView {
         }
     }
 
+    @Override
+    public void state(String state) {
+        SwingUtilities.invokeLater(() -> {
+            stateLabel.setText(state == null || state.isBlank() ? "" : state + "   ");
+            // Полоска видна, пока есть хоть что-то: состояние или сообщение.
+            statusLine.setVisible(!stateLabel.getText().isBlank()
+                    || !statusLabel.getText().isBlank());
+            statusLine.revalidate();
+            statusLine.repaint();
+        });
+    }
+
     private void setStatus(String message) {
         if (message == null || message.isBlank()) {
-            statusLine.setVisible(false);
+            statusLabel.setText("");
+            statusLine.setVisible(!stateLabel.getText().isBlank());
             return;
         }
         statusLabel.setText(message);

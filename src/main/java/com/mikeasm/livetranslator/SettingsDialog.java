@@ -73,6 +73,7 @@ public final class SettingsDialog {
         tabs.addTab("Доступ", accessTab(config, appliers));
         tabs.addTab("Файлы", filesTab(appliers));
         tabs.addTab("Звук из созвона", blackHoleTab());
+        tabs.addTab("О программе", aboutTab(config, appliers));
 
         JPanel root = new JPanel(new BorderLayout());
         root.add(tabs, BorderLayout.CENTER);
@@ -437,6 +438,64 @@ public final class SettingsDialog {
         row.add(note);
         row.add(Box.createHorizontalGlue());
         return row;
+    }
+
+    /**
+     * Версия и обновление.
+     * <p>
+     * Кнопка здесь нужна не вместо автоматической проверки при запуске, а
+     * вместе с ней: человек, которому сказали «обновись», должен найти, где это
+     * сделать, не выясняя, что такое терминал.
+     */
+    private static JPanel aboutTab(Config config, List<Applier> appliers) {
+        JPanel panel = new JPanel();
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.setBorder(BorderFactory.createEmptyBorder(16, 18, 16, 18));
+
+        panel.add(row("Версия", plain(Main.VERSION), ""));
+        panel.add(row("Движок", plain(config.usesGemini()
+                ? "Gemini, " + config.geminiModel()
+                : "Yandex SpeechKit"), ""));
+        panel.add(Box.createVerticalStrut(16));
+
+        JButton check = new JButton("Проверить обновление");
+        check.setAlignmentX(0);
+        check.addActionListener(e -> {
+            check.setEnabled(false);
+            check.setText("Проверяю…");
+            Main.checkForUpdates(() -> {
+                check.setText("Проверить обновление");
+                check.setEnabled(true);
+            });
+        });
+        panel.add(check);
+        panel.add(Box.createVerticalStrut(14));
+
+        JCheckBox auto = new JCheckBox("проверять обновления при запуске",
+                !"false".equalsIgnoreCase(Settings.get("LT_CHECK_UPDATES")));
+        auto.setAlignmentX(0);
+        panel.add(auto);
+        panel.add(Box.createVerticalStrut(12));
+        panel.add(note("Обновление ставится через Homebrew — тем же способом,",
+                "что и вручную, поэтому установка не разъезжается."));
+
+        appliers.add(() -> {
+            Settings.save("LT_CHECK_UPDATES", auto.isSelected() ? "" : "false");
+            return true;
+        });
+        panel.add(Box.createVerticalGlue());
+        return panel;
+    }
+
+    /** Нередактируемое значение в колонке полей: версия, имя движка. */
+    private static JLabel plain(String text) {
+        JLabel label = new JLabel(text);
+        label.setFont(label.getFont().deriveFont(Font.PLAIN, 12f));
+        Dimension size = new Dimension(220, 26);
+        label.setPreferredSize(size);
+        label.setMinimumSize(size);
+        label.setMaximumSize(size);
+        return label;
     }
 
     private static JPanel accessTab(Config config, List<Applier> appliers) {
