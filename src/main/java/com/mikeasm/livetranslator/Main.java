@@ -16,7 +16,7 @@ import java.util.concurrent.TimeUnit;
 public final class Main {
 
     /** Версия приложения — попадает в Info.plist значка. */
-    private static final String VERSION = "0.4.1";
+    private static final String VERSION = "0.4.2";
 
     public static void main(String[] args) throws Exception {
         Config parsed = Config.parse(args);
@@ -165,6 +165,7 @@ public final class Main {
                     }
                 });
 
+        session.pause();
         sessionRef.set(new Listening() {
             @Override
             public void feed(byte[] chunk) {
@@ -243,6 +244,9 @@ public final class Main {
             System.out.println("Словарь терминов: " + Glossary.plural(glossary.size())
                     + " из " + glossary.path() + " (правки подхватываются на ходу)");
         }
+        view.status("перевод на паузе — нажмите «продолжить», когда встреча начнётся");
+        System.out.println("Перевод на паузе: нажмите «продолжить» в панели, "
+                + "когда встреча начнётся.");
         System.out.println("Слушаю " + config.langsLabel()
                 + " (" + capture.device() + ")"
                 + ". Расшифровка пишется в " + log.path() + ". Выход — Ctrl+C.");
@@ -378,6 +382,9 @@ public final class Main {
         capture.onNotice(view::status);
         if (!capture.fallbackNotice().isBlank()) view.status(capture.fallbackNotice());
 
+        view.status("перевод на паузе — нажмите «продолжить», когда встреча начнётся");
+        System.out.println("Перевод на паузе: нажмите «продолжить» в панели, "
+                + "когда встреча начнётся.");
         System.out.println("Слушаю через Gemini " + config.geminiModel()
                 + ", кусками по " + config.chunkSeconds() + " с"
                 + " (" + capture.device() + ")."
@@ -499,7 +506,8 @@ public final class Main {
             @Override
             public boolean isPaused() {
                 Listening session = sessionRef.get();
-                return session != null && session.isPaused();
+                // Сессии ещё нет — значит, ничего и не переводится.
+                return session == null || session.isPaused();
             }
 
             @Override
