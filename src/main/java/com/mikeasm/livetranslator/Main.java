@@ -431,7 +431,7 @@ public final class Main {
             return;
         }
 
-        proposeInstall(update);
+        proposeInstall(null, update);
     }
 
     /**
@@ -440,19 +440,18 @@ public final class Main {
      * Проверка идёт в стороне, а окна показываются в потоке отрисовки: Swing
      * модальных окон из чужих потоков не прощает.
      */
-    static void checkForUpdates(Runnable done) {
+    static void checkForUpdates(java.awt.Component owner, Runnable done) {
         Thread probe = new Thread(() -> {
             java.util.Optional<Updates.Available> found = Updates.check(VERSION);
             javax.swing.SwingUtilities.invokeLater(() -> {
-                try {
-                    if (found.isPresent()) {
-                        proposeInstall(found.get());
-                    } else {
-                        javax.swing.JOptionPane.showMessageDialog(null,
-                                "У вас последняя версия: " + VERSION + ".");
-                    }
-                } finally {
-                    done.run();
+                // Кнопку возвращаем в исходное до показа ответа: иначе человек
+                // читает «У вас последняя версия», а рядом всё ещё «Проверяю…».
+                done.run();
+                if (found.isPresent()) {
+                    proposeInstall(owner, found.get());
+                } else {
+                    javax.swing.JOptionPane.showMessageDialog(owner,
+                            "У вас последняя версия: " + VERSION + ".");
                 }
             });
         }, "updates-manual");
@@ -461,16 +460,17 @@ public final class Main {
     }
 
     /** Спрашивает и ставит. Вызывается в потоке отрисовки. */
-    private static void proposeInstall(Updates.Available update) {
-        int answer = ask("Доступна версия " + update.version() + ", у вас " + VERSION + "."
-                + "\nОбновить сейчас? Приложение закроется и откроется заново.",
+    private static void proposeInstall(java.awt.Component owner, Updates.Available update) {
+        int answer = ask(owner, "Доступна версия " + update.version() + ", у вас "
+                + VERSION + ".\nОбновить сейчас? Приложение закроется и откроется заново.",
                 "Обновление", new String[]{"Обновить", "Позже"});
         if (answer != 0) return;
 
-        String failure = withProgress("Обновляю до " + update.version() + "…", Updates::install);
+        String failure = withProgress(owner, "Обновляю до " + update.version() + "…",
+                Updates::install);
         if (failure == null) return;
         if (!failure.isBlank()) {
-            javax.swing.JOptionPane.showMessageDialog(null,
+            javax.swing.JOptionPane.showMessageDialog(owner,
                     "Обновить не удалось: " + failure
                             + "\n\nМожно обновиться вручную: brew upgrade live-translator");
             return;
@@ -487,9 +487,13 @@ public final class Main {
      *
      * @return результат работы или null, если что-то пошло совсем не так
      */
-    private static String withProgress(String caption, java.util.function.Supplier<String> work) {
-        javax.swing.JDialog dialog = new javax.swing.JDialog((java.awt.Frame) null,
-                "Live Translator", true);
+    private static String withProgress(java.awt.Component owner, String caption,
+                                      java.util.function.Supplier<String> work) {
+        // При запуске владельца нет, и это законно: окна ещё не открыты.
+        java.awt.Window parent = owner == null
+                ? null : javax.swing.SwingUtilities.getWindowAncestor(owner);
+        javax.swing.JDialog dialog = new javax.swing.JDialog(parent, "Live Translator",
+                java.awt.Dialog.ModalityType.APPLICATION_MODAL);
         javax.swing.JPanel panel = new javax.swing.JPanel(new java.awt.BorderLayout(0, 12));
         panel.setBorder(javax.swing.BorderFactory.createEmptyBorder(18, 20, 18, 20));
         panel.add(new javax.swing.JLabel(caption), java.awt.BorderLayout.NORTH);
@@ -499,7 +503,7 @@ public final class Main {
         dialog.setContentPane(panel);
         dialog.setAlwaysOnTop(true);
         dialog.pack();
-        dialog.setLocationRelativeTo(null);
+        dialog.setLocationRelativeTo(owner);
         dialog.setDefaultCloseOperation(javax.swing.JDialog.DO_NOTHING_ON_CLOSE);
 
         java.util.concurrent.atomic.AtomicReference<String> result =
@@ -518,11 +522,12 @@ public final class Main {
     }
 
     /** Модальный вопрос поверх всех окон: под окном перевода его было бы не видно. */
-    private static int ask(String message, String title, String[] options) {
+    private static int ask(java.awt.Component owner, String message, String title,
+                           String[] options) {
         javax.swing.JOptionPane pane = new javax.swing.JOptionPane(message,
                 javax.swing.JOptionPane.QUESTION_MESSAGE,
                 javax.swing.JOptionPane.DEFAULT_OPTION, null, options, options[0]);
-        javax.swing.JDialog dialog = pane.createDialog(title);
+        javax.swing.JDialog dialog = pane.createDialog(owner, title);
         dialog.setAlwaysOnTop(true);
         dialog.setVisible(true);
         dialog.dispose();
