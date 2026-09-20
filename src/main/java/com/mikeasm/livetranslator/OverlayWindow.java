@@ -136,6 +136,9 @@ public final class OverlayWindow implements TranscriptView {
     private final JComboBox<String> deviceBox = new JComboBox<>();
     private final JLabel statusLabel = new JLabel(" ");
     private final LevelBar levelBar = new LevelBar();
+    private final JPanel statusLine = new JPanel();
+    /** Гасит устаревшее сообщение: оно описывает момент, а не состояние. */
+    private Timer statusTimer;
     private final JScrollPane scroll = new JScrollPane();
     private final JFrame frame;
     private final Control control;
@@ -159,7 +162,7 @@ public final class OverlayWindow implements TranscriptView {
 
         JPanel root = new JPanel(new BorderLayout());
         root.setBackground(BACKGROUND);
-        root.add(buildToolbar(), BorderLayout.NORTH);
+        root.add(buildHeader(), BorderLayout.NORTH);
         root.add(buildTranscript(config), BorderLayout.CENTER);
         root.add(buildPartial(config), BorderLayout.SOUTH);
         root.setPreferredSize(new Dimension(780, 470));
@@ -169,6 +172,34 @@ public final class OverlayWindow implements TranscriptView {
         frame.setVisible(true);
 
         if (control != null) new Timer(250, e -> tick()).start();
+    }
+
+    /**
+     * Панель управления и строка состояния друг под другом.
+     * <p>
+     * Раньше сообщения жили внутри панели и отъедали ширину у выбора источника
+     * и полоски уровня, а длинные — обрезались на краю окна. Собственная строка
+     * появляется только когда есть что сказать.
+     */
+    private JPanel buildHeader() {
+        JPanel header = new JPanel();
+        header.setLayout(new BoxLayout(header, BoxLayout.Y_AXIS));
+        header.setBackground(PANEL);
+        header.add(buildToolbar());
+        header.add(buildStatusLine());
+        return header;
+    }
+
+    private JPanel buildStatusLine() {
+        statusLabel.setForeground(MUTED);
+        statusLabel.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 12));
+
+        statusLine.setLayout(new BorderLayout());
+        statusLine.setBackground(new Color(0x23, 0x27, 0x31));
+        statusLine.setBorder(BorderFactory.createEmptyBorder(5, 14, 6, 14));
+        statusLine.add(statusLabel, BorderLayout.CENTER);
+        statusLine.setVisible(false);
+        return statusLine;
     }
 
     /** Меню нужно ради стандартного Cmd + , — настройки ищут именно там. */
@@ -239,9 +270,6 @@ public final class OverlayWindow implements TranscriptView {
             render();
         });
 
-        statusLabel.setForeground(MUTED);
-        statusLabel.setFont(small);
-
         bar.add(pauseButton);
         bar.add(Box.createHorizontalStrut(14));
         bar.add(deviceCaption);
@@ -253,7 +281,6 @@ public final class OverlayWindow implements TranscriptView {
         bar.add(Box.createHorizontalStrut(12));
         bar.add(showSource);
         bar.add(Box.createHorizontalGlue());
-        bar.add(statusLabel);
         return bar;
     }
 
@@ -387,7 +414,18 @@ public final class OverlayWindow implements TranscriptView {
     }
 
     private void setStatus(String message) {
+        if (message == null || message.isBlank()) {
+            statusLine.setVisible(false);
+            return;
+        }
         statusLabel.setText(message);
+        statusLine.setVisible(true);
+        statusLine.revalidate();
+
+        if (statusTimer != null) statusTimer.stop();
+        statusTimer = new Timer(25_000, e -> setStatus(null));
+        statusTimer.setRepeats(false);
+        statusTimer.start();
     }
 
     @Override

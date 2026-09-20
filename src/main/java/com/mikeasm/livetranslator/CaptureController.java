@@ -16,9 +16,6 @@ import java.util.function.Consumer;
  */
 public final class CaptureController implements AutoCloseable {
 
-    /** Через сколько молчания считать, что устройство вообще не получает звук. */
-    private static final long SILENT_DEVICE_SECONDS = 8;
-
     private final Config config;
     private final Consumer<byte[]> sink;
     /** Куда сообщать о замеченных неполадках. Задаётся после создания окна. */
@@ -29,10 +26,6 @@ public final class CaptureController implements AutoCloseable {
     private volatile WavRecorder recorder;
     /** Сглаженный уровень сигнала: нужен, чтобы показывать его в окне. */
     private volatile double level;
-    /** Приходил ли с устройства хоть какой-то сигнал после его выбора. */
-    private volatile boolean sawSignal;
-    private volatile long deviceOpenedAt;
-    private volatile boolean silenceReported;
 
     /** Сообщение о том, что пришлось взять не то устройство, которое просили. */
     private volatile String fallbackNotice = "";
@@ -66,16 +59,11 @@ public final class CaptureController implements AutoCloseable {
 
     private AudioCapture open(String name) throws LineUnavailableException {
         AudioCapture opened = new AudioCapture(config.sampleRate, name);
-        sawSignal = false;
-        silenceReported = false;
-        deviceOpenedAt = System.currentTimeMillis();
         opened.start(chunk -> {
             double rms = SilenceGate.rms(chunk);
             // Экспоненциальное сглаживание: мгновенный RMS слишком дёргается,
             // чтобы за ним следить глазами.
             level = 0.7 * level + 0.3 * rms;
-            if (rms > 0) sawSignal = true;
-            checkDeviceIsSilent();
             WavRecorder active = recorder;
             if (active != null) {
                 try {
@@ -93,28 +81,6 @@ public final class CaptureController implements AutoCloseable {
     /** Куда сообщать о неполадках со звуком. */
     public void onNotice(Consumer<String> notices) {
         this.notices = notices;
-    }
-
-    /**
-     * Отличает молчащее устройство от тихой комнаты.
-     * <p>
-     * Микрофон всегда отдаёт хоть какой-то шум, а виртуальный кабель при
-     * неверной маршрутизации — ровные нули. Внешне это одно и то же: пустое
-     * окно. Пользователь при этом ищет ошибку в приложении, хотя достаточно
-     * переключить вывод системы.
-     */
-    private void checkDeviceIsSilent() {
-        if (sawSignal || silenceReported) return;
-        if (System.currentTimeMillis() - deviceOpenedAt < SILENT_DEVICE_SECONDS * 1000) return;
-
-        silenceReported = true;
-        String name = device();
-        String hint = name.toLowerCase().contains("blackhole")
-                ? name + " не получает звук: в «Звук → Выход» должно быть"
-                        + " выбрано устройство с несколькими выходами"
-                : name + " не передаёт звук: проверьте, что выбран нужный источник";
-        notices.accept(hint);
-        System.err.println(hint);
     }
 
     /** Текущий уровень входного сигнала, шкала RMS 0..32767. */
