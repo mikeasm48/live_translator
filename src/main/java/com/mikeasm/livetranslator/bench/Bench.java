@@ -234,6 +234,7 @@ public final class Bench {
                 new YandexEngine(config, true),
                 new GoogleEngine(config),
                 new AzureEngine(config, true),
+                new AzureEngine(config, true, true),
                 new AzureEngine(config, false),
                 new GeminiEngine(config, false),
                 new GeminiEngine(config, true),

@@ -34,26 +34,42 @@ public final class AzureEngine implements AsrEngine {
     /** Быстрая расшифровка принимает до пяти часов. */
     private static final int FAST_CHUNK_MS = Integer.MAX_VALUE;
 
-    private static final String API_VERSION = "2024-11-15";
+    /**
+     * Версия API. Подсказка списком терминов появилась не сразу: на прошлогодней
+     * версии сервер отвечает «Invalid JSON format» вместо внятного отказа.
+     */
+    private static final String API_VERSION = "2025-10-15";
 
     private final Config config;
     private final boolean fast;
+    /** Подсказывать ли распознаванию список ожидаемых терминов. */
+    private final boolean withPhrases;
     private final String key = Settings.get("LT_AZURE_KEY");
     private final String region = Settings.get("LT_AZURE_REGION");
     private final String resource = Settings.get("LT_AZURE_RESOURCE");
 
     public AzureEngine(Config config, boolean fast) {
+        this(config, fast, false);
+    }
+
+    public AzureEngine(Config config, boolean fast, boolean withPhrases) {
         this.config = config;
         this.fast = fast;
+        this.withPhrases = withPhrases;
     }
 
     @Override
     public String id() {
+        if (withPhrases) return "azure-terms";
         return fast ? "azure" : "azure-short";
     }
 
     @Override
     public String title() {
+        if (withPhrases) {
+            return "Azure AI Speech, быстрая расшифровка с подсказкой терминов ("
+                    + phrases().size() + ")";
+        }
         return fast
                 ? "Azure AI Speech, быстрая расшифровка"
                 : "Azure AI Speech, короткие фрагменты по " + SHORT_CHUNK_MS / 1000 + " с";
@@ -102,6 +118,16 @@ public final class AzureEngine implements AsrEngine {
         for (String locale : locales()) locales.add(locale);
         definition.add("locales", locales);
         definition.addProperty("profanityFilterMode", "None");
+        if (withPhrases) {
+            List<String> terms = phrases();
+            if (!terms.isEmpty()) {
+                JsonArray list = new JsonArray();
+                for (String term : terms) list.add(term);
+                JsonObject phraseList = new JsonObject();
+                phraseList.add("phrases", list);
+                definition.add("phraseList", phraseList);
+            }
+        }
 
         String url = "https://" + host() + "/speechtotext/transcriptions:transcribe"
                 + "?api-version=" + ElevenLabsEngine.setting("LT_AZURE_API_VERSION", API_VERSION);
@@ -163,6 +189,29 @@ public final class AzureEngine implements AsrEngine {
             }
         }
         return text.isBlank() ? List.of() : List.of(new Transcript.Segment(0, text, locale));
+    }
+
+    /**
+     * Термины, которые стоит ожидать в речи: словарь приложения плюс всё, что
+     * добавлено в {@code LT_AZURE_PHRASES} через запятую.
+     * <p>
+     * Словарь приложения составлялся для перевода, а не для распознавания, и
+     * покрывает не всё — поэтому список можно дополнить, не трогая словарь.
+     */
+    private List<String> phrases() {
+        java.util.LinkedHashSet<String> terms = new java.util.LinkedHashSet<>();
+        try {
+            com.mikeasm.livetranslator.Glossary.load(
+                            java.nio.file.Path.of(config.glossaryPath), false)
+                    .ifPresent(glossary -> terms.addAll(glossary.sourceTerms()));
+        } catch (Exception e) {
+            System.err.println("   словарь для подсказки не прочитан: " + e.getMessage());
+        }
+        for (String extra : Settings.get("LT_AZURE_PHRASES").split(",")) {
+            String term = extra.trim();
+            if (!term.isEmpty()) terms.add(term);
+        }
+        return List.copyOf(terms);
     }
 
     /** Список языков для Azure: коды там полные, как у нас. */

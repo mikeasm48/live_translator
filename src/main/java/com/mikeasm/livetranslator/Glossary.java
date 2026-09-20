@@ -144,6 +144,18 @@ public final class Glossary {
         return TranslateGlossaryConfig.newBuilder().setGlossaryData(data).build();
     }
 
+    /**
+     * Исходные термины без переводов — для подсказки распознаванию.
+     * <p>
+     * Распознаванию перевод не нужен: ему надо заранее знать, какие слова могут
+     * прозвучать, чтобы не принять «IntelliJ IDEA» за похожий набор звуков.
+     */
+    public List<String> sourceTerms() {
+        List<String> terms = new java.util.ArrayList<>();
+        for (Pair pair : pairs) terms.add(pair.source());
+        return terms;
+    }
+
     /** Термины списком — для подсказки языковой модели. */
     public String asPromptList() {
         StringBuilder text = new StringBuilder();
