@@ -129,20 +129,29 @@ public final class SettingsDialog {
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
         panel.setBorder(BorderFactory.createEmptyBorder(16, 18, 16, 18));
 
-        panel.add(note(
-                "Отметьте языки, которые звучат на встрече — язык определяется",
-                "для каждой фразы отдельно. Лишние языки ухудшают определение,",
-                "поэтому отмечайте только те, что действительно звучат."));
+        // Gemini определяет язык сам, и списка от нас не ждёт. Подсказывать
+        // пробовали — замер на живой записи улучшения не показал, скорее
+        // наоборот. Поэтому в этом режиме выбирать нечего, и показывать список
+        // значит предлагать крутить то, что ни на что не влияет.
+        boolean picksLanguages = !config.usesGemini();
+        panel.add(picksLanguages
+                ? note("Отметьте языки, которые звучат на встрече — язык определяется",
+                        "для каждой фразы отдельно. Лишние языки ухудшают определение,",
+                        "поэтому отмечайте только те, что действительно звучат.")
+                : note("Gemini определяет язык сам, перечислять их не нужно.",
+                        "Задать нужно только язык, на который переводить."));
         panel.add(Box.createVerticalStrut(12));
 
         List<JCheckBox> boxes = new ArrayList<>();
-        for (Map.Entry<String, String> entry : LANGUAGES.entrySet()) {
-            JCheckBox box = new JCheckBox(entry.getValue() + "  (" + entry.getKey() + ")");
-            box.setSelected(config.sourceLangs().contains(entry.getKey()));
-            box.setAlignmentX(0);
-            box.putClientProperty("code", entry.getKey());
-            boxes.add(box);
-            panel.add(box);
+        if (picksLanguages) {
+            for (Map.Entry<String, String> entry : LANGUAGES.entrySet()) {
+                JCheckBox box = new JCheckBox(entry.getValue() + "  (" + entry.getKey() + ")");
+                box.setSelected(config.sourceLangs().contains(entry.getKey()));
+                box.setAlignmentX(0);
+                box.putClientProperty("code", entry.getKey());
+                boxes.add(box);
+                panel.add(box);
+            }
         }
 
         panel.add(Box.createVerticalStrut(14));
@@ -157,6 +166,9 @@ public final class SettingsDialog {
         panel.add(targetRow);
 
         appliers.add(() -> {
+            Settings.save("LT_TARGET", targetField.getText().trim());
+            if (!picksLanguages) return true;
+
             List<String> chosen = boxes.stream()
                     .filter(JCheckBox::isSelected)
                     .map(box -> (String) box.getClientProperty("code"))
@@ -168,7 +180,6 @@ public final class SettingsDialog {
             boolean changed = !chosen.equals(config.sourceLangs());
             config.setSourceLangs(chosen);
             Settings.save("LT_LANGS", String.join(",", chosen));
-            Settings.save("LT_TARGET", targetField.getText().trim());
             if (changed) onChanged.run();
             return true;
         });

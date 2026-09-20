@@ -386,7 +386,9 @@ public final class GeminiClient {
      */
     private static String clean(String text) {
         return text.strip()
-                .replaceAll("(?<![\\d:])\\d{1,3}:\\d{2}(?![\\d:])", " ")
+                // Скобки убираются вместе с отметкой: иначе от «[00:14]»
+                // остаётся «[ ]» посреди фразы.
+                .replaceAll("\\[?(?<![\\d:])\\d{1,3}:\\d{2}(?![\\d:])]?", " ")
                 .replaceAll("\\s{2,}", " ")
                 .strip();
     }
@@ -396,6 +398,9 @@ public final class GeminiClient {
             case "ru" -> "русский язык";
             case "en" -> "английский язык";
             case "uz" -> "узбекский язык";
+            case "kk" -> "казахский язык";
+            case "tr" -> "турецкий язык";
+            case "de" -> "немецкий язык";
             default -> code;
         };
     }
