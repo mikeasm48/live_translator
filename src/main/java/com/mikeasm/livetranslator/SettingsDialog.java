@@ -463,7 +463,7 @@ public final class SettingsDialog {
         check.addActionListener(e -> {
             check.setEnabled(false);
             check.setText("Проверяю…");
-            Main.checkForUpdates(() -> {
+            Main.checkForUpdates(check, () -> {
                 check.setText("Проверить обновление");
                 check.setEnabled(true);
             });
