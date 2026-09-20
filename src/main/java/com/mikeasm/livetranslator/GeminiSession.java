@@ -95,6 +95,8 @@ public final class GeminiSession implements AutoCloseable {
     private int silenceRunMs;
     /** Была ли в накопленном хоть какая-то речь: тишину отправлять незачем. */
     private boolean heardSpeech;
+    /** Сколько в накопленном именно речи, а не пауз. */
+    private int speechMs;
     private volatile boolean paused;
     private volatile boolean closed;
 
@@ -122,6 +124,7 @@ public final class GeminiSession implements AutoCloseable {
                     // которых у фразы срезается начало.
                     for (byte[] part : speech.chunks()) buffer.write(part, 0, part.length);
                     heardSpeech = true;
+                    speechMs += durationMs(chunk.length);
                     silenceRunMs = 0;
                 }
                 case SilenceGate.Silence silence -> {
@@ -138,12 +141,18 @@ public final class GeminiSession implements AutoCloseable {
         int baseWindowMs = (int) (hardLimitMs * BASE_WINDOW_SHARE);
 
         boolean pauseAfterEnough = collected >= baseWindowMs && silenceRunMs >= PAUSE_MS;
-        if (pauseAfterEnough || collected >= hardLimitMs) send(flush());
+        if (pauseAfterEnough || collected >= hardLimitMs) {
+            int speech = speechMs;
+            send(flush(), speech);
+        }
     }
 
     /** Отправляет накопленное, не дожидаясь паузы: встреча кончилась. */
     public synchronized void finish() {
-        if (heardSpeech && buffer.size() > 0) send(flush());
+        if (heardSpeech && buffer.size() > 0) {
+            int speech = speechMs;
+            send(flush(), speech);
+        }
     }
 
     private byte[] flush() {
@@ -152,14 +161,25 @@ public final class GeminiSession implements AutoCloseable {
         buffer.reset();
         silenceRunMs = 0;
         heardSpeech = false;
+        speechMs = 0;
         return audio;
     }
 
     /** Короче этого посылать нечего: на вдохе слов не бывает. */
     private static final int MIN_SEND_MS = 1200;
 
-    private void send(byte[] pcm) {
-        if (durationMs(pcm.length) < MIN_SEND_MS) return;
+    /**
+     * Столько речи должно набраться, чтобы кусок вообще уехал.
+     * <p>
+     * Проверяется именно речь, а не длина куска. Иначе тихая комната, в которой
+     * детектор изредка принимает шум за голос, копит секунды почти-тишины и
+     * отправляет их модели — а та на записи без слов отвечает не молчанием, а
+     * просьбой прислать запись, и эта просьба идёт в окно как перевод.
+     */
+    private static final int MIN_SPEECH_MS = 700;
+
+    private void send(byte[] pcm, int speechMs) {
+        if (durationMs(pcm.length) < MIN_SEND_MS || speechMs < MIN_SPEECH_MS) return;
         long startedAt = chunkStartedAt;
         sender.submit(() -> {
             try {
