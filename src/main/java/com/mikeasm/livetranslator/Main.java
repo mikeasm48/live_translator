@@ -59,6 +59,8 @@ public final class Main {
             }
             parsed = Config.parse(args);
         }
+        offerUpdate(parsed.showUi);
+
         // Ключ спрашивается до того, как откроется окно перевода: иначе
         // диалог соревнуется с ним за передний план, а человек видит панель и
         // думает, что программа просто не работает.
@@ -391,6 +393,107 @@ public final class Main {
                 + " Расшифровка пишется в " + log.path() + ". Выход — Ctrl+C.");
         System.out.println();
         shutdown.await();
+    }
+
+    /**
+     * Предлагает обновиться, если вышла версия новее.
+     * <p>
+     * Спрашивается до того, как откроется окно перевода: иначе диалог окажется
+     * под ним, как это уже было с вводом ключа. И до начала встречи, а не
+     * посреди неё.
+     */
+    private static void offerUpdate(boolean graphical) {
+        // Проверка не должна задерживать запуск: на сломанном сервере имён
+        // обращение к сети может подвиснуть дольше собственного таймаута.
+        java.util.concurrent.atomic.AtomicReference<Updates.Available> found =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        Thread probe = new Thread(() -> Updates.check(VERSION).ifPresent(found::set), "updates");
+        probe.setDaemon(true);
+        probe.start();
+        try {
+            probe.join(5000);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return;
+        }
+        Updates.Available update = found.get();
+        if (update == null) return;
+
+        if (!graphical || java.awt.GraphicsEnvironment.isHeadless()) {
+            System.out.println("Доступна версия " + update.version()
+                    + ". Обновить: brew upgrade live-translator");
+            return;
+        }
+
+        int answer = ask("Доступна версия " + update.version() + ", у вас " + VERSION + "."
+                + "\nОбновить сейчас? Приложение закроется и откроется заново.",
+                "Обновление", new String[]{"Обновить", "Позже"});
+        if (answer != 0) return;
+
+        String failure = withProgress("Обновляю до " + update.version() + "…", Updates::install);
+        if (failure == null) return;
+        if (!failure.isBlank()) {
+            javax.swing.JOptionPane.showMessageDialog(null,
+                    "Обновить не удалось: " + failure
+                            + "\n\nМожно обновиться вручную: brew upgrade live-translator");
+            return;
+        }
+        Updates.relaunch();
+        System.exit(0);
+    }
+
+    /**
+     * Показывает окно ожидания, пока работа идёт в стороне.
+     * <p>
+     * Обновление занимает минуту и больше, и без этого окна приложение выглядит
+     * зависшим.
+     *
+     * @return результат работы или null, если что-то пошло совсем не так
+     */
+    private static String withProgress(String caption, java.util.function.Supplier<String> work) {
+        javax.swing.JDialog dialog = new javax.swing.JDialog((java.awt.Frame) null,
+                "Live Translator", true);
+        javax.swing.JPanel panel = new javax.swing.JPanel(new java.awt.BorderLayout(0, 12));
+        panel.setBorder(javax.swing.BorderFactory.createEmptyBorder(18, 20, 18, 20));
+        panel.add(new javax.swing.JLabel(caption), java.awt.BorderLayout.NORTH);
+        javax.swing.JProgressBar bar = new javax.swing.JProgressBar();
+        bar.setIndeterminate(true);
+        panel.add(bar, java.awt.BorderLayout.CENTER);
+        dialog.setContentPane(panel);
+        dialog.setAlwaysOnTop(true);
+        dialog.pack();
+        dialog.setLocationRelativeTo(null);
+        dialog.setDefaultCloseOperation(javax.swing.JDialog.DO_NOTHING_ON_CLOSE);
+
+        java.util.concurrent.atomic.AtomicReference<String> result =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        Thread worker = new Thread(() -> {
+            try {
+                result.set(work.get());
+            } finally {
+                javax.swing.SwingUtilities.invokeLater(dialog::dispose);
+            }
+        }, "update-worker");
+        worker.setDaemon(true);
+        worker.start();
+        dialog.setVisible(true);
+        return result.get();
+    }
+
+    /** Модальный вопрос поверх всех окон: под окном перевода его было бы не видно. */
+    private static int ask(String message, String title, String[] options) {
+        javax.swing.JOptionPane pane = new javax.swing.JOptionPane(message,
+                javax.swing.JOptionPane.QUESTION_MESSAGE,
+                javax.swing.JOptionPane.DEFAULT_OPTION, null, options, options[0]);
+        javax.swing.JDialog dialog = pane.createDialog(title);
+        dialog.setAlwaysOnTop(true);
+        dialog.setVisible(true);
+        dialog.dispose();
+        Object choice = pane.getValue();
+        for (int i = 0; i < options.length; i++) {
+            if (options[i].equals(choice)) return i;
+        }
+        return -1;
     }
 
     /**
