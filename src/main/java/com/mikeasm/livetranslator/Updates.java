@@ -1,8 +1,5 @@
 package com.mikeasm.livetranslator;
 
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
-
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -28,8 +25,24 @@ import java.util.concurrent.TimeUnit;
  */
 public final class Updates {
 
-    private static final String LATEST =
-            "https://api.github.com/repos/mikeasm48/live_translator/releases/latest";
+    /**
+     * Версия берётся из формулы Homebrew, а не из GitHub API, и на то две
+     * причины.
+     * <p>
+     * У API лимит в шестьдесят запросов в час на адрес. В офисе за общим
+     * выходом его исчерпают чужие запросы, и обновление молча перестанет
+     * предлагаться — хуже, чем не иметь проверки вовсе, потому что на неё
+     * рассчитывают.
+     * <p>
+     * И формула честнее отвечает на настоящий вопрос. Нас интересует не «вышел
+     * ли релиз», а «есть ли версия, которую сейчас поставит brew». Если релиз
+     * выпущен, а формула ещё не обновлена, обещанное обновление не состоится.
+     */
+    private static final String FORMULA = "https://raw.githubusercontent.com/"
+            + "mikeasm48/homebrew-tap/main/Formula/live-translator.rb";
+
+    private static final java.util.regex.Pattern VERSION_LINE =
+            java.util.regex.Pattern.compile("(?m)^\\s*version\\s+\"([^\"]+)\"");
 
     /**
      * Проверка не должна задерживать запуск. Если сеть капризничает — а в
@@ -56,9 +69,8 @@ public final class Updates {
         // В разработке обновляться неоткуда, а без Homebrew — нечем.
         if (AppPaths.development() || brew() == null) return Optional.empty();
         try {
-            HttpRequest request = HttpRequest.newBuilder(URI.create(LATEST))
+            HttpRequest request = HttpRequest.newBuilder(URI.create(FORMULA))
                     .timeout(TIMEOUT)
-                    .header("accept", "application/vnd.github+json")
                     .GET()
                     .build();
             HttpResponse<String> response = HttpClient.newBuilder()
@@ -67,9 +79,9 @@ public final class Updates {
                     .send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
             if (response.statusCode() / 100 != 2) return Optional.empty();
 
-            JsonObject release = JsonParser.parseString(response.body()).getAsJsonObject();
-            String tag = release.has("tag_name") ? release.get("tag_name").getAsString() : "";
-            String latest = tag.startsWith("v") ? tag.substring(1) : tag;
+            java.util.regex.Matcher line = VERSION_LINE.matcher(response.body());
+            if (!line.find()) return Optional.empty();
+            String latest = line.group(1);
             return newer(latest, current) ? Optional.of(new Available(latest)) : Optional.empty();
         } catch (IOException | RuntimeException e) {
             // Нет сети, закрыт GitHub, изменился формат ответа — ни одно из
