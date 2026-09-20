@@ -79,7 +79,8 @@ public final class Translator implements AutoCloseable {
         pool.submit(() -> {
             // Языковая модель — основной путь, но сбой в ней не должен оставлять
             // встречу без перевода: тогда работает обычный переводчик.
-            if (llm != null) {
+            // Модель можно выключить в настройках на ходу.
+            if (llm != null && config.useLlm()) {
                 try {
                     String answer = llm.translate(text, sourceLang);
                     if (answer != null && !answer.isBlank()) {

@@ -23,7 +23,7 @@ public final class LevelMeter {
         String device = config.device.isBlank() ? "устройство по умолчанию" : config.device;
         System.out.println("Слушаю " + device + " " + SECONDS + " секунд.");
         System.out.println("Включите звук и следите за шкалой. Порог тишины: "
-                + (int) config.vadThreshold);
+                + (int) config.vadThreshold());
         System.out.println();
 
         AtomicLong peak = new AtomicLong();
@@ -35,9 +35,9 @@ public final class LevelMeter {
                 int level = (int) SilenceGate.rms(chunk);
                 peak.accumulateAndGet(level, Math::max);
                 totalChunks.incrementAndGet();
-                if (level >= config.vadThreshold) loudChunks.incrementAndGet();
+                if (level >= config.vadThreshold()) loudChunks.incrementAndGet();
                 // Обновляем не каждый фрагмент, иначе строка мельтешит.
-                if (totalChunks.get() % 3 == 0) print(level, config.vadThreshold);
+                if (totalChunks.get() % 3 == 0) print(level, config.vadThreshold());
             });
             Thread.sleep(SECONDS * 1000L);
         }
@@ -67,9 +67,9 @@ public final class LevelMeter {
                    Для BlackHole: в «Звук → Выход» должен быть выбран Multi-Output Device,
                    включающий BlackHole, — иначе в кабель ничего не попадает.""";
         }
-        if (peak < config.vadThreshold) {
+        if (peak < config.vadThreshold()) {
             return "Звук есть, но тихий: пик " + peak + " ниже порога "
-                    + (int) config.vadThreshold + ". Прибавьте громкость источника "
+                    + (int) config.vadThreshold() + ". Прибавьте громкость источника "
                     + "или снизьте порог: --vad-threshold=" + Math.max(30, peak / 2);
         }
         if (loudPercent < 5) {

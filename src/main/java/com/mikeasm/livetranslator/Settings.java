@@ -50,8 +50,12 @@ public final class Settings {
     }
 
     /**
-     * Сохраняет значение в {@code ./.env}, сохраняя комментарии и порядок строк.
-     * Существующая строка переписывается, новая дописывается в конец.
+     * Сохраняет значение, сохраняя комментарии и порядок строк: существующая
+     * строка переписывается, новая дописывается в конец.
+     * <p>
+     * Пустое значение означает «вернуть к умолчанию», поэтому строка удаляется,
+     * а не записывается пустой: иначе файл обрастает следами сброшенных
+     * настроек, а умолчание однажды поменяется и не доедет до тех, кто сбросил.
      */
     public static synchronized void save(String name, String value) {
         try {
@@ -68,17 +72,26 @@ public final class Settings {
                 int eq = line.indexOf('=');
                 if (eq < 0) continue;
                 if (line.substring(0, eq).trim().equals(name)) {
-                    lines.set(i, name + "=" + value);
+                    if (value.isBlank()) {
+                        lines.remove(i);
+                    } else {
+                        lines.set(i, name + "=" + value);
+                    }
                     replaced = true;
                     break;
                 }
             }
-            if (!replaced) lines.add(name + "=" + value);
+            if (!replaced && !value.isBlank()) lines.add(name + "=" + value);
 
             Files.write(WRITE_FILE, lines, StandardCharsets.UTF_8);
             restrictPermissions(WRITE_FILE);
-            values.put(name, value);
-            origins.put(name, WRITE_FILE.toString());
+            if (value.isBlank()) {
+                values.remove(name);
+                origins.remove(name);
+            } else {
+                values.put(name, value);
+                origins.put(name, WRITE_FILE.toString());
+            }
         } catch (IOException e) {
             System.err.println("Не удалось сохранить настройку " + name + ": " + e.getMessage());
         }

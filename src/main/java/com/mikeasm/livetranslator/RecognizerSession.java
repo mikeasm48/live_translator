@@ -176,7 +176,7 @@ public final class RecognizerSession {
         // при безостановочной речи пауз нет, фраза не закрывается никогда, и
         // пользователь видит лишь растущую гипотезу. Закрываем поток сами:
         // сервер тогда обязан выдать накопленное как final.
-        boolean stuck = now - lastFinalAt > config.maxPhraseSeconds * 1000L;
+        boolean stuck = now - lastFinalAt > config.maxPhraseSeconds() * 1000L;
         if (!soft && !stuck && age <= HARD_LIMIT_MS) return;
         if (stuck) lastFinalAt = now;
 

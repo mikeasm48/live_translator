@@ -27,8 +27,7 @@ public final class PhraseBuffer implements AutoCloseable {
         void segment(long id, String text, String language);
     }
 
-    private final int targetWords;
-    private final long quietMs;
+    private final Config config;
     private final Sink sink;
 
     private final ScheduledExecutorService timer = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -43,9 +42,8 @@ public final class PhraseBuffer implements AutoCloseable {
     private long nextId;
     private ScheduledFuture<?> pending;
 
-    public PhraseBuffer(int targetWords, long quietMs, Sink sink) {
-        this.targetWords = targetWords;
-        this.quietMs = quietMs;
+    public PhraseBuffer(Config config, Sink sink) {
+        this.config = config;
         this.sink = sink;
     }
 
@@ -60,11 +58,13 @@ public final class PhraseBuffer implements AutoCloseable {
 
         if (pending != null) pending.cancel(false);
 
-        if (words >= targetWords) {
+        // Пороги читаются при каждой фразе: их крутят в настройках на ходу.
+        if (words >= config.mergeWords()) {
             flush();
             return;
         }
-        pending = timer.schedule(this::flushQuietly, quietMs, TimeUnit.MILLISECONDS);
+        pending = timer.schedule(this::flushQuietly, config.mergeQuietMs(),
+                TimeUnit.MILLISECONDS);
     }
 
     private void flushQuietly() {

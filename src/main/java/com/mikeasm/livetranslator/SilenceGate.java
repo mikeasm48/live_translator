@@ -15,14 +15,14 @@ public final class SilenceGate {
     /** Глубина буфера предзаписи. */
     private static final int PREROLL_CHUNKS = 3;
 
-    private final double threshold;
+    private final Config config;
     private final byte[][] preroll = new byte[PREROLL_CHUNKS][];
     private int prerollSize;
     private int quietStreak;
     private boolean speaking;
 
-    public SilenceGate(double threshold) {
-        this.threshold = threshold;
+    public SilenceGate(Config config) {
+        this.config = config;
     }
 
     /** Результат обработки фрагмента. */
@@ -35,7 +35,8 @@ public final class SilenceGate {
     public record Silence(int durationMs) implements Decision {}
 
     public Decision offer(byte[] chunk) {
-        boolean loud = rms(chunk) >= threshold;
+        // Порог читается при каждом фрагменте: его крутят в настройках на ходу.
+        boolean loud = rms(chunk) >= config.vadThreshold();
         if (loud) {
             quietStreak = 0;
             if (!speaking) {

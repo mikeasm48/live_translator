@@ -47,11 +47,12 @@ public final class SettingsDialog {
 
     private SettingsDialog() {}
 
-    /** @param onLanguagesChanged вызывается, когда набор языков сохранён */
-    public static void show(Frame owner, Config config, Runnable onLanguagesChanged) {
+    /** @param onRecognitionChanged перезапускает распознавание с новыми настройками */
+    public static void show(Frame owner, Config config, Runnable onRecognitionChanged) {
         JDialog dialog = new JDialog(owner, "Настройки", true);
         JTabbedPane tabs = new JTabbedPane();
-        tabs.addTab("Языки", languagesTab(config, onLanguagesChanged));
+        tabs.addTab("Языки", languagesTab(config, onRecognitionChanged));
+        tabs.addTab("Качество", tuningTab(config, onRecognitionChanged));
         tabs.addTab("Доступ", accessTab(config));
         tabs.addTab("Файлы", filesTab());
         tabs.addTab("Звук из созвона", blackHoleTab());
@@ -117,6 +118,145 @@ public final class SettingsDialog {
         panel.add(save);
         panel.add(Box.createVerticalGlue());
         return panel;
+    }
+
+    /**
+     * Параметры нарезки речи и перевода.
+     * <p>
+     * Все они — размен между скоростью и качеством, и верных значений «вообще»
+     * не существует: они зависят от того, как говорит конкретная команда.
+     * Поэтому крутятся на ходу, без перезапуска: изменение настроек
+     * распознавания пересоздаёт поток, остальное подхватывается само.
+     */
+    private static JPanel tuningTab(Config config, Runnable onRecognitionChanged) {
+        JPanel panel = new JPanel();
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.setBorder(BorderFactory.createEmptyBorder(14, 18, 14, 18));
+
+        panel.add(note(
+                "Меньше задержка — короче куски и хуже перевод; больше — наоборот.",
+                "Значения применяются сразу, перезапуск не нужен."));
+        panel.add(Box.createVerticalStrut(12));
+
+        JTextField pause = field(String.valueOf(config.pauseMs()));
+        JTextField maxPhrase = field(String.valueOf(config.maxPhraseSeconds()));
+        JTextField vad = field(String.valueOf((int) config.vadThreshold()));
+        JTextField mergeWords = field(String.valueOf(config.mergeWords()));
+        JTextField mergeQuiet = field(String.valueOf(config.mergeQuietMs()));
+        JTextField model = field(config.llmModel(), 180);
+        JCheckBox eouHigh = new JCheckBox("чаще резать фразы", config.eouHigh());
+        JCheckBox literature = new JCheckBox("расставлять знаки препинания", config.literature());
+        JCheckBox useLlm = new JCheckBox("переводить языковой моделью", config.useLlm());
+
+        panel.add(row("Пауза между словами, мс", pause,
+                "после неё фраза считается законченной"));
+        panel.add(row("Предел длины фразы, с", maxPhrase,
+                "дольше — закрываем принудительно"));
+        panel.add(row("Порог тишины", vad,
+                "ниже — в облако не уходит"));
+        panel.add(row("Копить слов перед переводом", mergeWords,
+                "обрывки переводятся плохо"));
+        panel.add(row("Ждать продолжения, мс", mergeQuiet,
+                "главный вклад в задержку"));
+        panel.add(row("Модель перевода", model, "например yandexgpt/latest"));
+
+        for (JCheckBox box : new JCheckBox[]{eouHigh, literature, useLlm}) {
+            box.setAlignmentX(0);
+            panel.add(box);
+        }
+
+        panel.add(Box.createVerticalStrut(14));
+        JPanel buttons = new JPanel();
+        buttons.setLayout(new BoxLayout(buttons, BoxLayout.X_AXIS));
+        buttons.setAlignmentX(0);
+
+        JButton save = new JButton("Применить");
+        save.addActionListener(e -> {
+            try {
+                config.setRecognitionTuning(
+                        Integer.parseInt(pause.getText().trim()),
+                        eouHigh.isSelected(),
+                        literature.isSelected(),
+                        Integer.parseInt(maxPhrase.getText().trim()),
+                        Double.parseDouble(vad.getText().trim()));
+                config.setTranslationTuning(
+                        Integer.parseInt(mergeWords.getText().trim()),
+                        Long.parseLong(mergeQuiet.getText().trim()),
+                        useLlm.isSelected(),
+                        model.getText().trim());
+            } catch (NumberFormatException ex) {
+                JOptionPane.showMessageDialog(null, "Числовое поле заполнено неверно.");
+                return;
+            }
+            onRecognitionChanged.run();
+            JOptionPane.showMessageDialog(null, "Применено.");
+        });
+
+        JButton reset = new JButton("Сбросить к значениям по умолчанию");
+        reset.addActionListener(e -> {
+            config.resetTuning();
+            pause.setText(String.valueOf(config.pauseMs()));
+            maxPhrase.setText(String.valueOf(config.maxPhraseSeconds()));
+            vad.setText(String.valueOf((int) config.vadThreshold()));
+            mergeWords.setText(String.valueOf(config.mergeWords()));
+            mergeQuiet.setText(String.valueOf(config.mergeQuietMs()));
+            model.setText(config.llmModel());
+            eouHigh.setSelected(config.eouHigh());
+            literature.setSelected(config.literature());
+            useLlm.setSelected(config.useLlm());
+            onRecognitionChanged.run();
+            JOptionPane.showMessageDialog(null, "Настройки возвращены к исходным.");
+        });
+
+        buttons.add(save);
+        buttons.add(Box.createHorizontalStrut(10));
+        buttons.add(reset);
+        buttons.add(Box.createHorizontalGlue());
+        panel.add(buttons);
+        panel.add(Box.createVerticalGlue());
+        return panel;
+    }
+
+    private static JTextField field(String value) {
+        return field(value, 90);
+    }
+
+    /** Ширина задаётся жёстко: иначе BoxLayout выравнивает поля по содержимому
+     *  и колонка разъезжается, а длинное значение обрезается. */
+    private static JTextField field(String value, int width) {
+        JTextField field = new JTextField(value);
+        Dimension size = new Dimension(width, 26);
+        field.setPreferredSize(size);
+        field.setMinimumSize(size);
+        field.setMaximumSize(size);
+        return field;
+    }
+
+    /** Строка «подпись — поле — пояснение» одинаковой высоты. */
+    private static JPanel row(String caption, JTextField field, String hint) {
+        JPanel row = new JPanel();
+        row.setLayout(new BoxLayout(row, BoxLayout.X_AXIS));
+        row.setAlignmentX(0);
+        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
+
+        JLabel name = new JLabel(caption);
+        name.setFont(name.getFont().deriveFont(Font.PLAIN, 12f));
+        // Минимум задаётся наравне с остальными размерами: без него подпись
+        // сжимается, когда строка не помещается, и колонка полей разъезжается.
+        Dimension captionSize = new Dimension(230, 24);
+        name.setPreferredSize(captionSize);
+        name.setMinimumSize(captionSize);
+        name.setMaximumSize(captionSize);
+
+        JLabel note = new JLabel("  " + hint);
+        note.setFont(note.getFont().deriveFont(Font.PLAIN, 11f));
+        note.setForeground(new java.awt.Color(0x6B, 0x70, 0x7B));
+
+        row.add(name);
+        row.add(field);
+        row.add(note);
+        row.add(Box.createHorizontalGlue());
+        return row;
     }
 
     private static JPanel accessTab(Config config) {

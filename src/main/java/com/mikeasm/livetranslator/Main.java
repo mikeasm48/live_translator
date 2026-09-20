@@ -16,7 +16,7 @@ import java.util.concurrent.TimeUnit;
 public final class Main {
 
     /** Версия приложения — попадает в Info.plist значка. */
-    private static final String VERSION = "0.3.0";
+    private static final String VERSION = "0.3.1";
 
     public static void main(String[] args) throws Exception {
         Config parsed = Config.parse(args);
@@ -64,7 +64,7 @@ public final class Main {
         // Захват создаётся раньше распознавания, поэтому сессия отдаётся ему
         // через ссылку: до её появления звук просто отбрасывается.
         AtomicReference<RecognizerSession> sessionRef = new AtomicReference<>();
-        SilenceGate gate = parsed.vadEnabled ? new SilenceGate(parsed.vadThreshold) : null;
+        SilenceGate gate = parsed.vadEnabled ? new SilenceGate(parsed) : null;
         CaptureController capture = openCapture(parsed, sessionRef, gate);
 
         // После возможной донастройки значение больше не меняется —
@@ -73,13 +73,13 @@ public final class Main {
 
         List<TranscriptView> views = new ArrayList<>();
         views.add(new ConsoleView());
-        if (config.showUi) views.add(OverlayWindow.create(config, controlFor(capture, config.vadThreshold, sessionRef)));
+        if (config.showUi) views.add(OverlayWindow.create(config, controlFor(capture, config.vadThreshold(), sessionRef)));
         SessionLog log = new SessionLog(AppPaths.logsDir());
         views.add(log);
         TranscriptView view = fanOut(views);
 
         AtomicReference<Translator> translatorRef = new AtomicReference<>();
-        PhraseBuffer phrases = new PhraseBuffer(config.mergeWords, config.mergeQuietMs,
+        PhraseBuffer phrases = new PhraseBuffer(config,
                 (id, text, lang) -> showAndTranslate(view, translatorRef.get(), config,
                         id, text, lang));
 
@@ -88,7 +88,7 @@ public final class Main {
                 ? YandexGrpc.channel(YandexGrpc.TRANSLATE_ENDPOINT, config)
                 : null;
         Glossary glossary = loadGlossary(config);
-        ManagedChannel llmChannel = config.translate && config.useLlm
+        ManagedChannel llmChannel = config.translate && config.useLlm()
                 ? YandexGrpc.channel(YandexGrpc.LLM_ENDPOINT, config)
                 : null;
         LlmTranslator llm = llmChannel == null

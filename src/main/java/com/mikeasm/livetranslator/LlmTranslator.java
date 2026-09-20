@@ -65,7 +65,7 @@ public final class LlmTranslator {
     /** @return перевод или null, если модель не ответила */
     public String translate(String text, String sourceLang) {
         CompletionRequest request = CompletionRequest.newBuilder()
-                .setModelUri("gpt://" + config.folderId + "/" + config.llmModel)
+                .setModelUri("gpt://" + config.folderId + "/" + config.llmModel())
                 .setCompletionOptions(TextCommon.CompletionOptions.newBuilder()
                         .setStream(false)
                         // Перевод должен быть предсказуемым, а не изобретательным.

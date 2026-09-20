@@ -107,7 +107,7 @@ public final class SpeechKitStream {
                                 .setProfanityFilter(false)
                                 // Пунктуация — это то, по чему переводчик понимает
                                 // границы мыслей; на слитной речи может помочь.
-                                .setLiteratureText(config.literature))
+                                .setLiteratureText(config.literature()))
                         .setLanguageRestriction(Stt.LanguageRestrictionOptions.newBuilder()
                                 .setRestrictionType(Stt.LanguageRestrictionOptions
                                         .LanguageRestrictionType.WHITELIST)
@@ -119,10 +119,10 @@ public final class SpeechKitStream {
                 // приходит поздно и целой простынёй. Поэтому режем чаще.
                 .setEouClassifier(Stt.EouClassifierOptions.newBuilder()
                         .setDefaultClassifier(Stt.DefaultEouClassifier.newBuilder()
-                                .setType(config.eouHigh
+                                .setType(config.eouHigh()
                                         ? Stt.DefaultEouClassifier.EouSensitivity.HIGH
                                         : Stt.DefaultEouClassifier.EouSensitivity.DEFAULT)
-                                .setMaxPauseBetweenWordsHintMs(config.pauseMs)))
+                                .setMaxPauseBetweenWordsHintMs(config.pauseMs())))
                 .build();
     }
 
