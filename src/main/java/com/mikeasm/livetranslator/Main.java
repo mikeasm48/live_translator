@@ -59,6 +59,18 @@ public final class Main {
             }
             parsed = Config.parse(args);
         }
+        // Ключ спрашивается до того, как откроется окно перевода: иначе
+        // диалог соревнуется с ним за передний план, а человек видит панель и
+        // думает, что программа просто не работает.
+        if (parsed.usesGemini() && !has(args, "--selftest") && probePhrase(args) == null) {
+            if (!FirstRun.ensureGeminiKey(parsed.showUi)) {
+                System.err.println("Без ключа Gemini переводить нечем.");
+                System.err.println("Ключ берётся на https://aistudio.google.com/apikey");
+                System.err.println("Либо работать по-прежнему через Yandex: --engine=yandex");
+                System.exit(1);
+            }
+            parsed = Config.parse(args);
+        }
         if (hasValue(args, "--bench=")) {
             com.mikeasm.livetranslator.bench.Bench.run(parsed, args);
             return;

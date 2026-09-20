@@ -154,10 +154,22 @@ public final class FirstRun {
         where.setFont(where.getFont().deriveFont(java.awt.Font.PLAIN, 12f));
         panel.add(where);
 
-        int answer = JOptionPane.showConfirmDialog(null, panel,
-                "Live Translator — ключ Gemini", JOptionPane.OK_CANCEL_OPTION,
-                JOptionPane.PLAIN_MESSAGE);
-        if (answer != JOptionPane.OK_OPTION) return false;
+        // Окно перевода держится поверх всех окон, и диалог без владельца
+        // уходит под него: человек видит панель, а спросить ключ будто бы никто
+        // не спросил. Поэтому диалог тоже поверх всех и сам выходит на передний
+        // план.
+        JOptionPane pane = new JOptionPane(panel, JOptionPane.PLAIN_MESSAGE,
+                JOptionPane.OK_CANCEL_OPTION);
+        javax.swing.JDialog dialog = pane.createDialog("Live Translator — ключ Gemini");
+        dialog.setAlwaysOnTop(true);
+        dialog.toFront();
+        dialog.requestFocus();
+        dialog.setVisible(true);
+        dialog.dispose();
+        Object choice = pane.getValue();
+        if (!(choice instanceof Integer answer) || answer != JOptionPane.OK_OPTION) {
+            return false;
+        }
 
         char[] key = field.getPassword();
         try {
