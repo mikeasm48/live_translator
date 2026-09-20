@@ -73,9 +73,13 @@ public final class Translator implements AutoCloseable {
                 ? "" : language.split("-")[0].toLowerCase(java.util.Locale.ROOT);
     }
 
-    /** Асинхронно переводит текст; callback вызывается в потоке пула. */
+    /**
+     * Асинхронно переводит текст; callback вызывается в потоке пула и получает
+     * вместе с переводом то, каким путём этот перевод добыт.
+     */
     public void translate(String text, String sourceLang,
-                          Consumer<String> callback, Consumer<String> onError) {
+                          java.util.function.BiConsumer<String, TranslatedBy> callback,
+                          Consumer<String> onError) {
         pool.submit(() -> {
             // Языковая модель — основной путь, но сбой в ней не должен оставлять
             // встречу без перевода: тогда работает обычный переводчик.
@@ -84,7 +88,7 @@ public final class Translator implements AutoCloseable {
                 try {
                     String answer = llm.translate(text, sourceLang);
                     if (answer != null && !answer.isBlank()) {
-                        callback.accept(answer);
+                        callback.accept(answer, TranslatedBy.MODEL);
                         return;
                     }
                     statusSink.accept("модель не ответила, перевожу обычным способом");
@@ -110,7 +114,7 @@ public final class Translator implements AutoCloseable {
                         .withDeadlineAfter(10, TimeUnit.SECONDS)
                         .translate(request.build());
                 if (response.getTranslationsCount() > 0) {
-                    callback.accept(response.getTranslations(0).getText());
+                    callback.accept(response.getTranslations(0).getText(), TranslatedBy.PLAIN);
                 }
             } catch (RuntimeException e) {
                 onError.accept(e.getMessage() == null ? e.toString() : e.getMessage());

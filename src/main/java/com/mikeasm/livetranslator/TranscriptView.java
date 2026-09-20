@@ -12,8 +12,8 @@ public interface TranscriptView {
      */
     void phrase(long id, String source, String language);
 
-    /** Перевод для ранее показанной фразы. */
-    void translation(long id, String translated);
+    /** Перевод для ранее показанной фразы и то, каким путём он получен. */
+    void translation(long id, String translated, TranslatedBy by);
 
     /** Служебное сообщение. */
     void status(String message);

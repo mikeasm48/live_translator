@@ -38,7 +38,7 @@ public final class ConsoleView implements TranscriptView {
     }
 
     @Override
-    public synchronized void translation(long id, String translated) {
+    public synchronized void translation(long id, String translated, TranslatedBy by) {
         System.out.println(CLEAR_LINE + "ru: " + translated);
         System.out.println();
     }
