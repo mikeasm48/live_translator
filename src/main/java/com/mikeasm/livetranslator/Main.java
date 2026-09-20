@@ -69,8 +69,11 @@ public final class Main {
             return;
         }
         if (has(args, "--selftest")) {
-            System.out.println("0. Ключ: " + parsed.credentialOrigin()
-                    + "; каталог " + parsed.folderId + ": " + Settings.origin("YC_FOLDER_ID"));
+            if (!parsed.usesGemini()) {
+                System.out.println("0. Ключ: " + parsed.credentialOrigin()
+                        + "; каталог " + parsed.folderId + ": "
+                        + Settings.origin("YC_FOLDER_ID"));
+            }
             SelfTest.run(parsed, loadGlossary(parsed));
             return;
         }

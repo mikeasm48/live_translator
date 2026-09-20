@@ -21,8 +21,75 @@ public final class SelfTest {
     private SelfTest() {}
 
     public static void run(Config config, Glossary glossary) throws InterruptedException {
+        if (config.usesGemini()) {
+            checkGemini(config);
+            return;
+        }
         checkRecognition(config);
         checkTranslation(config, glossary);
+    }
+
+    /**
+     * Проверка связки с Gemini без микрофона.
+     * <p>
+     * Нужна не для отладки, а для встречи. Корпоративный VPN умеет подсунуть
+     * нерабочий сервер имён, сеть в поездке бывает своенравной, ключ может быть
+     * не тот — и выясняется это обычно в ту минуту, когда все уже собрались.
+     * Секунда тишины стоит долей копейки и отвечает на вопрос заранее.
+     */
+    private static void checkGemini(Config config) {
+        // Источник запоминается при чтении значения, поэтому сначала читаем.
+        boolean haveKey = !config.geminiKey().isBlank();
+        System.out.println("0. Ключ: " + (haveKey ? Settings.origin("LT_GEMINI_KEY") : "не задан")
+                + "; модель " + config.geminiModel());
+        System.out.println("1. Разрешение имени generativelanguage.googleapis.com…");
+        try {
+            java.net.InetAddress.getByName("generativelanguage.googleapis.com");
+        } catch (java.net.UnknownHostException e) {
+            System.out.println("   Имя не разрешается. Это не про ключ и не про приложение:");
+            System.out.println("   не отвечает сервер имён. Частая причина — включённый VPN.");
+            System.out.println("   Проверить: nslookup generativelanguage.googleapis.com");
+            return;
+        }
+
+        System.out.println("2. Запрос к модели (секунда тишины)…");
+        GeminiClient client = new GeminiClient(config);
+        if (!client.skipReason().isBlank()) {
+            System.out.println("   " + client.skipReason() + ".");
+            System.out.println("   Ключ вводится в настройках: Cmd + , → «Доступ».");
+            return;
+        }
+        try {
+            long startedAt = System.currentTimeMillis();
+            client.translate(GeminiSession.wav(new byte[config.sampleRate * 2], config.sampleRate),
+                    false);
+            System.out.println("3. Модель ответила за "
+                    + (System.currentTimeMillis() - startedAt) + " мс.");
+            System.out.println("   Израсходовано токенов: " + client.tokensUsed() + ".");
+            System.out.println("4. Готово, связка работает.");
+        } catch (java.io.IOException e) {
+            reportGemini(e.getMessage() == null ? e.toString() : e.getMessage());
+        }
+    }
+
+    private static void reportGemini(String message) {
+        System.out.println("   Запрос не прошёл: " + message);
+        if (message.contains("401") || message.contains("403")
+                || message.toLowerCase().contains("api key")) {
+            System.out.println("   Похоже, ключ не принят. Новый берётся на"
+                    + " https://aistudio.google.com/apikey");
+            System.out.println("   и вводится в настройках: Cmd + , → «Доступ».");
+            return;
+        }
+        if (message.contains("429")) {
+            System.out.println("   Исчерпан лимит запросов. На бесплатном тарифе он"
+                    + " невелик — проверьте тариф в AI Studio.");
+            return;
+        }
+        if (message.contains("404")) {
+            System.out.println("   Модель " + "не найдена: имена у Gemini меняются."
+                    + " Другое имя задаётся настройкой LT_GEMINI_MODEL.");
+        }
     }
 
     /**
