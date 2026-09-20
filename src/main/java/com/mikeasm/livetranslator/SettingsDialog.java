@@ -440,6 +440,68 @@ public final class SettingsDialog {
     }
 
     private static JPanel accessTab(Config config, List<Applier> appliers) {
+        // Ключи у движков разные, и показывать оба разом значит предлагать
+        // заполнить тот, который сейчас ни на что не влияет.
+        return config.usesGemini() ? geminiAccessTab(appliers) : yandexAccessTab(config, appliers);
+    }
+
+    /**
+     * Ключ Gemini.
+     * <p>
+     * Поле нужно потому, что приложением пользуются не из терминала: его
+     * открывают двойным щелчком из «Программ». Инструкция вида «выполните
+     * security add-generic-password» для такого человека равносильна тому, что
+     * программа не работает.
+     */
+    private static JPanel geminiAccessTab(List<Applier> appliers) {
+        JPanel panel = new JPanel();
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.setBorder(BorderFactory.createEmptyBorder(16, 18, 16, 18));
+
+        boolean haveKey = !Settings.get("LT_GEMINI_KEY").isBlank();
+        panel.add(note(
+                "Ключ хранится в связке ключей macOS — в файле настроек остаётся",
+                "только команда его чтения.",
+                haveKey ? "Источник текущего ключа: " + Settings.origin("LT_GEMINI_KEY") + "."
+                        : "Ключ пока не задан — без него перевод не работает."));
+        panel.add(Box.createVerticalStrut(14));
+
+        panel.add(label("Новый ключ Gemini"));
+        JPasswordField keyField = new JPasswordField();
+        keyField.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+        keyField.setAlignmentX(0);
+        panel.add(keyField);
+        panel.add(Box.createVerticalStrut(10));
+        panel.add(note("Ключ берётся бесплатно на aistudio.google.com/apikey.",
+                "Он применится при следующем запуске приложения."));
+        panel.add(Box.createVerticalStrut(16));
+
+        appliers.add(() -> {
+            char[] key = keyField.getPassword();
+            try {
+                if (key.length == 0) return true;
+                String complaint = FirstRun.checkGeminiKey(key);
+                if (complaint != null) {
+                    JOptionPane.showMessageDialog(null, complaint);
+                    return false;
+                }
+                if (!FirstRun.saveGeminiKey(key)) {
+                    JOptionPane.showMessageDialog(null, "Ключ сохранить не удалось.");
+                    return false;
+                }
+            } finally {
+                Arrays.fill(key, ' ');
+            }
+            keyField.setText("");
+            JOptionPane.showMessageDialog(null,
+                    "Ключ сохранён. Он подхватится при следующем запуске.");
+            return true;
+        });
+        panel.add(Box.createVerticalGlue());
+        return panel;
+    }
+
+    private static JPanel yandexAccessTab(Config config, List<Applier> appliers) {
         JPanel panel = new JPanel();
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
         panel.setBorder(BorderFactory.createEmptyBorder(16, 18, 16, 18));
