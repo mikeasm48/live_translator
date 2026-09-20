@@ -40,6 +40,9 @@ public final class GeminiSession implements AutoCloseable {
         void line(long id, String original, String text, java.time.LocalTime spokenAt);
 
         void status(String message);
+
+        /** Чем сессия занята прямо сейчас. */
+        void state(String state);
     }
 
     private final Config config;
@@ -108,6 +111,22 @@ public final class GeminiSession implements AutoCloseable {
     private volatile boolean paused = true;
     private volatile boolean closed;
 
+    /**
+     * Что показывать в строке состояния.
+     * <p>
+     * Только положения, которые длятся: «записываю речь», «жду ответа модели»,
+     * «тишина». Короткие переходы не показываются вовсе — мелькающая надпись
+     * хуже отсутствующей, потому что её нельзя прочесть, но она отвлекает.
+     * Поэтому «тишина» появляется не сразу, а после двух секунд молчания.
+     */
+    private static final int QUIET_STATE_MS = 2000;
+
+    private volatile String shownState = "";
+    /** Сколько кусков сейчас в работе у модели. */
+    private final java.util.concurrent.atomic.AtomicInteger inFlight =
+            new java.util.concurrent.atomic.AtomicInteger();
+    private volatile boolean speaking;
+
     public GeminiSession(Config config, GeminiClient client, SilenceGate gate, Listener listener) {
         this.config = config;
         this.client = client;
@@ -131,19 +150,26 @@ public final class GeminiSession implements AutoCloseable {
                     // приходит предзапись — доли секунды до первого звука, без
                     // которых у фразы срезается начало.
                     for (byte[] part : speech.chunks()) buffer.write(part, 0, part.length);
+                    speaking = true;
                     heardSpeech = true;
                     speechMs += durationMs(chunk.length);
                     silenceRunMs = 0;
                 }
                 case SilenceGate.Silence silence -> {
+                    speaking = false;
                     // Тишину до первых слов не копим: платить за неё незачем.
-                    if (!heardSpeech) return;
+                    if (!heardSpeech) {
+                        silenceRunMs += silence.durationMs();
+                        refreshState();
+                        return;
+                    }
                     buffer.write(chunk, 0, chunk.length);
                     silenceRunMs += silence.durationMs();
                 }
             }
         }
 
+        refreshState();
         int collected = durationMs(buffer.size());
         int hardLimitMs = Math.max(2000, config.chunkSeconds() * 1000);
         int baseWindowMs = (int) (hardLimitMs * BASE_WINDOW_SHARE);
@@ -189,6 +215,8 @@ public final class GeminiSession implements AutoCloseable {
     private void send(byte[] pcm, int speechMs) {
         if (durationMs(pcm.length) < MIN_SEND_MS || speechMs < MIN_SPEECH_MS) return;
         long startedAt = chunkStartedAt;
+        inFlight.incrementAndGet();
+        refreshState();
         sender.submit(() -> {
             try {
                 List<GeminiClient.Line> lines =
@@ -205,6 +233,9 @@ public final class GeminiSession implements AutoCloseable {
                 // Оборванная цепочка — не повод молчать дальше: начинаем разговор
                 // заново, иначе ссылка на потерянный ответ будет валить и следующие.
                 client.resetConversation();
+            } finally {
+                inFlight.decrementAndGet();
+                refreshState();
             }
         });
     }
@@ -256,12 +287,35 @@ public final class GeminiSession implements AutoCloseable {
         return ".!?…".indexOf(last) >= 0;
     }
 
+    /**
+     * Сводит положение дел к одной надписи.
+     * <p>
+     * Приоритет не случаен: ожидание ответа важнее всего — именно в эти секунды
+     * человек не понимает, работает ли программа. Речь важнее тишины: пока
+     * говорят, показывать «тишина» неверно, даже если детектор моргнул.
+     */
+    private void refreshState() {
+        String state;
+        if (paused) state = "на паузе";
+        else if (inFlight.get() > 0) state = "жду ответа модели";
+        else if (speaking) state = "записываю речь";
+        else if (silenceRunMs >= QUIET_STATE_MS) state = "тишина";
+        else return;   // короткий переход: прежняя надпись честнее новой
+
+        if (!state.equals(shownState)) {
+            shownState = state;
+            listener.state(state);
+        }
+    }
+
     public void pause() {
         paused = true;
+        refreshState();
     }
 
     public void resume() {
         paused = false;
+        refreshState();
     }
 
     public boolean isPaused() {
