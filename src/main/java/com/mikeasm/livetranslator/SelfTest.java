@@ -101,7 +101,7 @@ public final class SelfTest {
                         public void onPartial(String text) {}
 
                         @Override
-                        public void onFinal(long index, String text, String language) {}
+                        public void onFinal(long index, String text, String language, long endMs) {}
 
                         @Override
                         public void onRefinement(long index, String text, String language) {}

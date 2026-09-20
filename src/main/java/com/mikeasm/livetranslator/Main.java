@@ -40,6 +40,10 @@ public final class Main {
             demo(parsed);
             return;
         }
+        if (has(args, "--bench-help")) {
+            com.mikeasm.livetranslator.bench.Bench.printUsage();
+            return;
+        }
         if (parsed.apiKey.isBlank() && parsed.iamToken.isBlank()
                 || parsed.translate && parsed.folderId.isBlank()) {
             // Первый запуск на новой машине: спрашиваем доступы и запоминаем.
@@ -49,6 +53,10 @@ public final class Main {
                 System.exit(1);
             }
             parsed = Config.parse(args);
+        }
+        if (hasValue(args, "--bench=")) {
+            com.mikeasm.livetranslator.bench.Bench.run(parsed, args);
+            return;
         }
         String probe = probePhrase(args);
         if (probe != null) {
@@ -107,7 +115,7 @@ public final class Main {
                     }
 
                     @Override
-                    public void onFinal(long index, String text, String language) {
+                    public void onFinal(long index, String text, String language, long endMs) {
                         // Чистим до показа и до перевода: зациклившееся
                         // распознавание переводчик усиливает многократно.
                         String clean = TextCleanup.collapseRepeats(text);
@@ -443,6 +451,14 @@ public final class Main {
         return false;
     }
 
+    /** Есть ли аргумент с таким началом — для ключей вида {@code --bench=файл}. */
+    private static boolean hasValue(String[] args, String prefix) {
+        for (String arg : args) {
+            if (arg.startsWith(prefix)) return true;
+        }
+        return false;
+    }
+
     private static void printUsage() {
         System.out.println("""
                 Live Translator — живой перевод речи через Yandex AI Studio.
@@ -475,6 +491,8 @@ public final class Main {
                   --no-vad              слать тишину как звук (отключить фильтр пауз)
                   --vad-threshold=180   порог тишины, RMS 0..32767
                   --font-size=20        размер шрифта в окне
+                  --bench=запись.wav    прогнать запись через все движки распознавания
+                  --bench-help          подробности про стенд сравнения движков
                 """);
     }
 }

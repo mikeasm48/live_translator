@@ -21,8 +21,11 @@ public final class SpeechKitStream {
         /** Промежуточная гипотеза, текст ещё будет меняться. */
         void onPartial(String text);
 
-        /** Фраза распознана. {@code language} — определённый язык или пусто. */
-        void onFinal(long index, String text, String language);
+        /**
+         * Фраза распознана. {@code language} — определённый язык или пусто,
+         * {@code endMs} — конец фразы от начала потока.
+         */
+        void onFinal(long index, String text, String language, long endMs);
 
         /** Уточнённый (нормализованный) вариант ранее выданной фразы. */
         void onRefinement(long index, String text, String language);
@@ -38,6 +41,15 @@ public final class SpeechKitStream {
     private final AtomicBoolean closed = new AtomicBoolean();
 
     public SpeechKitStream(ManagedChannel channel, Config config, Listener listener) {
+        this(channel, sessionOptions(config), listener);
+    }
+
+    /**
+     * Сессия с готовыми настройками. Нужна стенду сравнения движков: он гоняет
+     * ту же связку в отложенном режиме и с другой частотой дискретизации.
+     */
+    public SpeechKitStream(ManagedChannel channel, Stt.StreamingOptions options,
+                           Listener listener) {
         RecognizerGrpc.RecognizerStub stub = RecognizerGrpc.newStub(channel);
         this.requests = stub.recognizeStreaming(new StreamObserver<>() {
             @Override
@@ -51,7 +63,8 @@ public final class SpeechKitStream {
                         String text = firstAlternative(response.getFinal());
                         if (!text.isBlank()) {
                             listener.onFinal(response.getAudioCursors().getFinalIndex(), text,
-                                    detectedLanguage(response.getFinal()));
+                                    detectedLanguage(response.getFinal()),
+                                    response.getAudioCursors().getFinalTimeMs());
                         }
                     }
                     case FINAL_REFINEMENT -> {
@@ -88,11 +101,12 @@ public final class SpeechKitStream {
         });
 
         requests.onNext(Stt.StreamingRequest.newBuilder()
-                .setSessionOptions(sessionOptions(config))
+                .setSessionOptions(options)
                 .build());
     }
 
-    private static Stt.StreamingOptions sessionOptions(Config config) {
+    /** Настройки сессии, какими их использует живой перевод. */
+    public static Stt.StreamingOptions sessionOptions(Config config) {
         return Stt.StreamingOptions.newBuilder()
                 .setRecognitionModel(Stt.RecognitionModelOptions.newBuilder()
                         .setModel("general")

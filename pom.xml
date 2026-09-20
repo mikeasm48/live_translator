@@ -60,6 +60,15 @@
       <groupId>com.google.protobuf</groupId>
       <artifactId>protobuf-java</artifactId>
     </dependency>
+
+    <!-- Разбор ответов движков, у которых нет gRPC. Библиотека и так приезжает
+         внутри grpc, но стенд зависит от неё напрямую — значит, и объявить её
+         надо напрямую, иначе обновление grpc однажды молча сломает сборку. -->
+    <dependency>
+      <groupId>com.google.code.gson</groupId>
+      <artifactId>gson</artifactId>
+      <version>2.11.0</version>
+    </dependency>
   </dependencies>
 
   <build>

@@ -61,11 +61,11 @@ public final class RecognizerSession {
             }
 
             @Override
-            public void onFinal(long index, String text, String language) {
+            public void onFinal(long index, String text, String language, long endMs) {
                 reconnectDelay = RECONNECT_DELAY_MS;
                 lastFinalAt = System.currentTimeMillis();
                 track(index);
-                listener.onFinal(offset + index, text, language);
+                listener.onFinal(offset + index, text, language, endMs);
             }
 
             @Override
