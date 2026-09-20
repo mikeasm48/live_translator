@@ -16,9 +16,20 @@ public final class Keychain {
     /** Под этим именем запись видна в «Связке ключей». */
     public static final String SERVICE = "live-translator";
 
+    /**
+     * Ключ Gemini лежит отдельной записью.
+     * <p>
+     * Отдельной, а не вместо яндексовой: движок переключается в настройках, и
+     * замена одного ключа другим лишила бы возможности вернуться обратно.
+     */
+    public static final String GEMINI_SERVICE = "live-translator-gemini";
+
     /** Команда, которую приложение потом выполняет, чтобы получить ключ. */
-    public static final String READ_COMMAND =
-            "security find-generic-password -s " + SERVICE + " -w";
+    public static final String READ_COMMAND = readCommand(SERVICE);
+
+    public static String readCommand(String service) {
+        return "security find-generic-password -s " + service + " -w";
+    }
 
     private Keychain() {}
 
@@ -30,10 +41,14 @@ public final class Keychain {
      * который положила предыдущая, и не спрашивать его заново.
      */
     public static boolean exists() {
+        return exists(SERVICE);
+    }
+
+    public static boolean exists(String service) {
         if (!available()) return false;
         try {
             Process process = new ProcessBuilder("security", "find-generic-password",
-                    "-s", SERVICE)
+                    "-s", service)
                     .redirectOutput(ProcessBuilder.Redirect.DISCARD)
                     .redirectError(ProcessBuilder.Redirect.DISCARD)
                     .start();
@@ -66,6 +81,11 @@ public final class Keychain {
      * «password data for new item».
      */
     public static void store(char[] secret) throws IOException, InterruptedException {
+        store(SERVICE, secret);
+    }
+
+    public static void store(String service, char[] secret)
+            throws IOException, InterruptedException {
         Process process = new ProcessBuilder("security", "-i")
                 .redirectErrorStream(true)
                 .start();
@@ -85,7 +105,7 @@ public final class Keychain {
         try (OutputStream in = process.getOutputStream()) {
             String command = "add-generic-password -U"
                     + " -a " + quote(System.getProperty("user.name", "user"))
-                    + " -s " + quote(SERVICE)
+                    + " -s " + quote(service)
                     + " -w " + quote(new String(secret))
                     + "\n";
             byte[] bytes = command.getBytes(StandardCharsets.UTF_8);

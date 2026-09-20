@@ -123,6 +123,89 @@ public final class FirstRun {
      *
      * @return жалоба для показа пользователю или null, если всё в порядке
      */
+    /**
+     * Спрашивает ключ Gemini, если его ещё нет.
+     * <p>
+     * Окно, а не сообщение в терминале: приложение запускают двойным щелчком из
+     * «Программ», и человек, которому оно предназначено, консоли не увидит
+     * вовсе — для него программа просто не откроется.
+     *
+     * @return ложь, если ключа так и нет
+     */
+    public static boolean ensureGeminiKey(boolean graphical) {
+        if (!Settings.get("LT_GEMINI_KEY").isBlank()) return true;
+        if (Keychain.exists(Keychain.GEMINI_SERVICE)) {
+            // Ключ уже в связке от прошлой установки — достаточно записать,
+            // как его оттуда брать.
+            Settings.save("LT_GEMINI_KEY_CMD", Keychain.readCommand(Keychain.GEMINI_SERVICE));
+            return true;
+        }
+        if (!graphical || java.awt.GraphicsEnvironment.isHeadless()) return false;
+
+        JPasswordField field = new JPasswordField();
+        JPanel panel = new JPanel();
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.add(caption("Ключ Gemini"));
+        panel.add(field);
+        panel.add(Box.createVerticalStrut(10));
+        JLabel where = new JLabel("<html><body style='width:360px'>"
+                + "Ключ берётся бесплатно на aistudio.google.com/apikey.<br>"
+                + "Он сохранится в связке ключей macOS, а не в файле.</body></html>");
+        where.setFont(where.getFont().deriveFont(java.awt.Font.PLAIN, 12f));
+        panel.add(where);
+
+        int answer = JOptionPane.showConfirmDialog(null, panel,
+                "Live Translator — ключ Gemini", JOptionPane.OK_CANCEL_OPTION,
+                JOptionPane.PLAIN_MESSAGE);
+        if (answer != JOptionPane.OK_OPTION) return false;
+
+        char[] key = field.getPassword();
+        try {
+            String complaint = checkGeminiKey(key);
+            if (complaint != null) {
+                JOptionPane.showMessageDialog(null, complaint);
+                return ensureGeminiKey(true);
+            }
+            return saveGeminiKey(key);
+        } finally {
+            java.util.Arrays.fill(key, ' ');
+        }
+    }
+
+    /** Кладёт ключ Gemini в связку и запоминает, как его оттуда читать. */
+    public static boolean saveGeminiKey(char[] key) {
+        try {
+            Keychain.store(Keychain.GEMINI_SERVICE, key);
+            Settings.save("LT_GEMINI_KEY_CMD", Keychain.readCommand(Keychain.GEMINI_SERVICE));
+            // Ключ открытым текстом больше не нужен: команда его вытеснит,
+            // но значение из файла главнее, поэтому строку надо убрать.
+            Settings.save("LT_GEMINI_KEY", "");
+            return true;
+        } catch (IOException | InterruptedException e) {
+            if (e instanceof InterruptedException) Thread.currentThread().interrupt();
+            System.err.println("Не удалось сохранить ключ: " + e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Проверяет ключ на очевидные ошибки. Перепутать ключи легко: оба длинные,
+     * оба набираются вслепую в поле с точками.
+     */
+    public static String checkGeminiKey(char[] key) {
+        String value = new String(key).trim();
+        if (value.isEmpty()) return "Ключ пустой.";
+        if (value.contains(" ") || value.contains("\n")) {
+            return "В ключе пробелы — похоже, скопировалось лишнее.";
+        }
+        if (value.startsWith("AQVN") || value.startsWith("b1g")) {
+            return "Это похоже на ключ Yandex, а нужен ключ Gemini.\n"
+                    + "Ключ Gemini берётся на aistudio.google.com/apikey.";
+        }
+        if (value.length() < 20) return "Ключ короче, чем бывает у Gemini.";
+        return null;
+    }
+
     public static String checkFolder(String folder) {
         if (folder.isEmpty()) return "Каталог не указан.";
         if (folder.startsWith("AQVN")) {

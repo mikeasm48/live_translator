@@ -16,7 +16,7 @@ import java.util.concurrent.TimeUnit;
 public final class Main {
 
     /** Версия приложения — попадает в Info.plist значка. */
-    private static final String VERSION = "0.3.6";
+    private static final String VERSION = "0.4.0";
 
     public static void main(String[] args) throws Exception {
         Config parsed = Config.parse(args);
@@ -268,12 +268,24 @@ public final class Main {
                                     SessionLog log) throws Exception {
         GeminiClient client = new GeminiClient(config);
         if (!client.skipReason().isBlank()) {
-            System.err.println("Gemini выбран движком, но " + client.skipReason() + ".");
-            System.err.println("Положите ключ и повторите, либо запустите с --engine=yandex.");
-            System.exit(1);
+            // Приложение запускают двойным щелчком из «Программ», и человек,
+            // которому оно предназначено, терминала не увидит вовсе — для него
+            // сообщение в консоли равносильно тому, что программа не работает.
+            // Поэтому ключ спрашивается окном, а консольная подсказка остаётся
+            // только для запуска из терминала.
+            if (!FirstRun.ensureGeminiKey(config.showUi)) {
+                System.err.println("Gemini выбран движком, но " + client.skipReason() + ".");
+                System.err.println("Ключ берётся на https://aistudio.google.com/apikey");
+                System.err.println("и вводится в настройках приложения: Cmd + , → «Доступ».");
+                System.err.println("Либо работать по-прежнему через Yandex: --engine=yandex");
+                System.exit(1);
+            }
+            // Настройки перечитываются: ключ только что появился.
+            client = new GeminiClient(Config.parse(new String[0]));
         }
 
-        GeminiSession gemini = new GeminiSession(config, client, gate,
+        GeminiClient ready = client;
+        GeminiSession gemini = new GeminiSession(config, ready, gate,
                 new GeminiSession.Listener() {
                     @Override
                     public void line(long id, String original, String text,
@@ -631,11 +643,12 @@ public final class Main {
 
     private static void printUsage() {
         System.out.println("""
-                Live Translator — живой перевод речи через Yandex AI Studio.
+                Live Translator — живой перевод речи на встрече.
 
                 Переменные окружения:
-                  YC_API_KEY     Api-Key сервисного аккаунта (или YC_IAM_TOKEN)
-                  YC_FOLDER_ID   идентификатор каталога, обязателен для перевода
+                  LT_GEMINI_KEY  ключ Gemini (движок по умолчанию)
+                  YC_API_KEY     Api-Key Yandex, если выбран движок yandex
+                  YC_FOLDER_ID   идентификатор каталога Yandex
 
                 Аргументы:
                   --list-devices        показать доступные устройства записи
