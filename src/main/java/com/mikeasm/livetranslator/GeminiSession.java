@@ -97,7 +97,15 @@ public final class GeminiSession implements AutoCloseable {
     private boolean heardSpeech;
     /** Сколько в накопленном именно речи, а не пауз. */
     private int speechMs;
-    private volatile boolean paused;
+    /**
+     * Приложение начинает работу на паузе — это намеренно.
+     * <p>
+     * Окно открывают заранее, до начала встречи, и в тишине модель принимается
+     * выдумывать: на комнатном шуме она сочиняет правдоподобный разговор из
+     * терминов, которые мы же ей и подсказали. Пусть лучше человек нажмёт
+     * «продолжить», когда встреча действительно началась.
+     */
+    private volatile boolean paused = true;
     private volatile boolean closed;
 
     public GeminiSession(Config config, GeminiClient client, SilenceGate gate, Listener listener) {
