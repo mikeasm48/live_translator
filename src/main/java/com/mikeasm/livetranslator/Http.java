@@ -1,4 +1,4 @@
-package com.mikeasm.livetranslator.bench;
+package com.mikeasm.livetranslator;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -8,18 +8,16 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
 
 /**
- * Минимальный HTTP-клиент для движков, у которых нет gRPC.
+ * Минимальный HTTP-клиент для сервисов, у которых нет gRPC.
  * <p>
  * Отдельная зависимость ради четырёх запросов не нужна, а вот внятная ошибка
  * нужна: без тела ответа отладка чужого API превращается в гадание по коду
  * состояния.
  */
-final class Http {
+public final class Http {
 
     /** Запрос может быть долгим: час записи режется на куски, но куски крупные. */
     private static final Duration REQUEST_TIMEOUT = Duration.ofMinutes(20);
@@ -31,11 +29,11 @@ final class Http {
 
     private Http() {}
 
-    static String get(String url, Map<String, String> headers) throws IOException {
+    public static String get(String url, Map<String, String> headers) throws IOException {
         return send(request(url, headers).GET().build(), url);
     }
 
-    static String postJson(String url, Map<String, String> headers, String json) throws IOException {
+    public static String postJson(String url, Map<String, String> headers, String json) throws IOException {
         HttpRequest request = request(url, headers)
                 .header("content-type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8))
@@ -43,7 +41,7 @@ final class Http {
         return send(request, url);
     }
 
-    static String postBytes(String url, Map<String, String> headers, byte[] body,
+    public static String postBytes(String url, Map<String, String> headers, byte[] body,
                             String contentType) throws IOException {
         HttpRequest request = request(url, headers)
                 .header("content-type", contentType)
@@ -53,7 +51,7 @@ final class Http {
     }
 
     /** Загрузка файла вместе с текстовыми полями — как её ждут STT-сервисы. */
-    static String postMultipart(String url, Map<String, String> headers,
+    public static String postMultipart(String url, Map<String, String> headers,
                                 Map<String, String> fields,
                                 String fileField, String fileName, byte[] file,
                                 String fileType) throws IOException {
@@ -123,44 +121,4 @@ final class Http {
         return text.length() <= 400 ? text : text.substring(0, 400) + "…";
     }
 
-    /**
-     * Собирает слова в реплики: по паузе между словами или по накопленной длине.
-     * Движки, отдающие только слова с временами, иначе дали бы одну простыню,
-     * которую не с чем сопоставить.
-     */
-    static List<Transcript.Segment> groupWords(List<Word> words, String language) {
-        List<Transcript.Segment> segments = new ArrayList<>();
-        StringBuilder line = new StringBuilder();
-        int start = 0;
-        int count = 0;
-        double previousEnd = -1;
-
-        for (Word word : words) {
-            if (word.text() == null || word.text().isBlank()) continue;
-            boolean pause = previousEnd >= 0 && word.startMs() - previousEnd > GAP_MS;
-            if (!line.isEmpty() && (pause || count >= MAX_WORDS)) {
-                segments.add(new Transcript.Segment(start, line.toString().trim(), language));
-                line.setLength(0);
-                count = 0;
-            }
-            if (line.isEmpty()) start = (int) word.startMs();
-            if (!line.isEmpty() && !word.text().startsWith(" ")) line.append(' ');
-            line.append(word.text().trim());
-            previousEnd = word.endMs();
-            count++;
-        }
-        if (!line.isEmpty()) {
-            segments.add(new Transcript.Segment(start, line.toString().trim(), language));
-        }
-        return segments;
-    }
-
-    /** Пауза, после которой начинается новая реплика. */
-    private static final double GAP_MS = 700;
-
-    /** Предел длины реплики в словах. */
-    private static final int MAX_WORDS = 14;
-
-    /** Слово с временами в миллисекундах от начала куска. */
-    record Word(String text, double startMs, double endMs) {}
 }

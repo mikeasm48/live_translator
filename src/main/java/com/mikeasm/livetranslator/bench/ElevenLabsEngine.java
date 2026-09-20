@@ -5,6 +5,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.mikeasm.livetranslator.Config;
+import com.mikeasm.livetranslator.Http;
 import com.mikeasm.livetranslator.Settings;
 
 import java.util.ArrayList;
@@ -67,15 +68,15 @@ public final class ElevenLabsEngine implements AsrEngine {
             return all.isBlank() ? List.of() : List.of(new Transcript.Segment(0, all, language));
         }
 
-        List<Http.Word> parsed = new ArrayList<>();
+        List<Words.Word> parsed = new ArrayList<>();
         for (JsonElement element : words) {
             JsonObject word = element.getAsJsonObject();
             // Служебные элементы («spacing») текста не несут.
             if (word.has("type") && !"word".equals(text(word, "type"))) continue;
-            parsed.add(new Http.Word(text(word, "text"),
+            parsed.add(new Words.Word(text(word, "text"),
                     seconds(word, "start") * 1000, seconds(word, "end") * 1000));
         }
-        return Http.groupWords(parsed, language);
+        return Words.group(parsed, language);
     }
 
     /** Scribe ждёт код языка без региона. */

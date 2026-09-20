@@ -44,8 +44,13 @@ public final class Main {
             com.mikeasm.livetranslator.bench.Bench.printUsage();
             return;
         }
-        if (parsed.apiKey.isBlank() && parsed.iamToken.isBlank()
-                || parsed.translate && parsed.folderId.isBlank()) {
+        // Ключи Yandex спрашиваем, только если ими и будем пользоваться: на
+        // Gemini у приложения свой ключ, и требовать чужой — значит не пускать
+        // человека к работе из-за сервиса, который ему не нужен.
+        boolean needsYandex = !parsed.usesGemini() || has(args, "--selftest")
+                || probePhrase(args) != null;
+        if (needsYandex && (parsed.apiKey.isBlank() && parsed.iamToken.isBlank()
+                || parsed.translate && parsed.folderId.isBlank())) {
             // Первый запуск на новой машине: спрашиваем доступы и запоминаем.
             if (!FirstRun.ensureConfigured(parsed.showUi)) {
                 System.err.println("Без ключа и каталога работать не с чем. "
@@ -71,7 +76,7 @@ public final class Main {
         }
         // Захват создаётся раньше распознавания, поэтому сессия отдаётся ему
         // через ссылку: до её появления звук просто отбрасывается.
-        AtomicReference<RecognizerSession> sessionRef = new AtomicReference<>();
+        AtomicReference<Listening> sessionRef = new AtomicReference<>();
         SilenceGate gate = parsed.vadEnabled ? new SilenceGate(parsed) : null;
         CaptureController capture = openCapture(parsed, sessionRef, gate);
 
@@ -85,6 +90,11 @@ public final class Main {
         SessionLog log = new SessionLog(AppPaths.logsDir());
         views.add(log);
         TranscriptView view = fanOut(views);
+
+        if (config.usesGemini()) {
+            runOnGemini(config, capture, gate, sessionRef, view, log);
+            return;
+        }
 
         AtomicReference<Translator> translatorRef = new AtomicReference<>();
         PhraseBuffer phrases = new PhraseBuffer(config,
@@ -140,7 +150,37 @@ public final class Main {
                     }
                 });
 
-        sessionRef.set(session);
+        sessionRef.set(new Listening() {
+            @Override
+            public void feed(byte[] chunk) {
+                Main.feed(session, gate, chunk);
+            }
+
+            @Override
+            public void pause() {
+                session.pause();
+            }
+
+            @Override
+            public void resume() {
+                session.resume();
+            }
+
+            @Override
+            public boolean isPaused() {
+                return session.isPaused();
+            }
+
+            @Override
+            public void languagesChanged() {
+                session.restart();
+            }
+
+            @Override
+            public void close() {
+                session.stop();
+            }
+        });
         if (config.recordFromStart) {
             System.out.println("Запись звука: " + capture.startRecording());
         }
@@ -219,12 +259,135 @@ public final class Main {
         }
     }
 
+    /**
+     * Живой перевод через Gemini: модель слышит звук сама и сразу отвечает
+     * по-русски, без отдельного распознавания и отдельного перевода.
+     */
+    private static void runOnGemini(Config config, CaptureController capture, SilenceGate gate,
+                                    AtomicReference<Listening> sessionRef, TranscriptView view,
+                                    SessionLog log) throws Exception {
+        GeminiClient client = new GeminiClient(config);
+        if (!client.skipReason().isBlank()) {
+            System.err.println("Gemini выбран движком, но " + client.skipReason() + ".");
+            System.err.println("Положите ключ и повторите, либо запустите с --engine=yandex.");
+            System.exit(1);
+        }
+
+        GeminiSession gemini = new GeminiSession(config, client, gate,
+                new GeminiSession.Listener() {
+                    @Override
+                    public void line(long id, String original, String text) {
+                        // Языковой метки у нас здесь нет и взяться ей неоткуда:
+                        // модель слушает звук, а не подписывает его языком.
+                        if (original.isBlank()) {
+                            view.phrase(id, text, "");
+                            view.translation(id, text, TranslatedBy.SOURCE);
+                        } else {
+                            view.phrase(id, original, "");
+                            view.translation(id, text, TranslatedBy.MODEL);
+                        }
+                    }
+
+                    @Override
+                    public void status(String message) {
+                        view.status(message);
+                    }
+                });
+
+        sessionRef.set(new Listening() {
+            @Override
+            public void feed(byte[] chunk) {
+                gemini.offer(chunk);
+            }
+
+            @Override
+            public void pause() {
+                gemini.pause();
+            }
+
+            @Override
+            public void resume() {
+                gemini.resume();
+            }
+
+            @Override
+            public boolean isPaused() {
+                return gemini.isPaused();
+            }
+
+            @Override
+            public void close() {
+                gemini.close();
+            }
+        });
+
+        if (config.recordFromStart) {
+            System.out.println("Запись звука: " + capture.startRecording());
+        }
+
+        CountDownLatch shutdown = new CountDownLatch(1);
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            Thread watchdog = new Thread(() -> {
+                try {
+                    Thread.sleep(45000);
+                } catch (InterruptedException e) {
+                    return;
+                }
+                System.err.println("Завершение затянулось, выходим принудительно.");
+                Runtime.getRuntime().halt(0);
+            }, "shutdown-watchdog");
+            watchdog.setDaemon(true);
+            watchdog.start();
+
+            // Недоговорённый кусок отправляется и дожидается ответа: конец
+            // встречи обычно и есть самое важное.
+            quietly("последний кусок", gemini::close);
+            quietly("сохранение лога", log::close);
+            quietly("остановка записи", capture::close);
+            shutdown.countDown();
+        }));
+
+        capture.onNotice(view::status);
+        if (!capture.fallbackNotice().isBlank()) view.status(capture.fallbackNotice());
+
+        System.out.println("Слушаю через Gemini " + config.geminiModel()
+                + ", кусками по " + config.chunkSeconds() + " с"
+                + " (" + capture.device() + ")."
+                + " Расшифровка пишется в " + log.path() + ". Выход — Ctrl+C.");
+        System.out.println();
+        shutdown.await();
+    }
+
+    /**
+     * То, что слушает речь. Движка два: прежний Yandex и Gemini, который
+     * слышит звук сам и сразу отвечает по-русски. Панель и захват звука не
+     * должны знать, какой из них работает.
+     */
+    private interface Listening extends AutoCloseable {
+        void feed(byte[] chunk);
+
+        void pause();
+
+        void resume();
+
+        boolean isPaused();
+
+        /** Языки поменяли в настройках — применить. */
+        default void languagesChanged() {}
+
+        @Override
+        void close();
+    }
+
     /** Устройство теперь задаётся в .env, поэтому опечатка в имени — рядовой случай. */
     private static CaptureController openCapture(Config config,
-                                                 AtomicReference<RecognizerSession> sessionRef,
+                                                 AtomicReference<Listening> sessionRef,
                                                  SilenceGate gate) {
         try {
-            return new CaptureController(config, chunk -> feed(sessionRef.get(), gate, chunk));
+            return new CaptureController(config, chunk -> {
+                Listening listening = sessionRef.get();
+                if (listening != null) listening.feed(chunk);
+            });
         } catch (javax.sound.sampled.LineUnavailableException e) {
             System.err.println(e.getMessage());
             System.exit(1);
@@ -251,7 +414,7 @@ public final class Main {
 
     /** Переходник между окном и управлением захватом. */
     private static OverlayWindow.Control controlFor(CaptureController capture, SilenceGate gate,
-                                                    AtomicReference<RecognizerSession> sessionRef) {
+                                                    AtomicReference<Listening> sessionRef) {
         return new OverlayWindow.Control() {
             @Override
             public List<String> availableDevices() {
@@ -301,19 +464,19 @@ public final class Main {
 
             @Override
             public void languagesChanged() {
-                RecognizerSession session = sessionRef.get();
-                if (session != null) session.restart();
+                Listening session = sessionRef.get();
+                if (session != null) session.languagesChanged();
             }
 
             @Override
             public boolean isPaused() {
-                RecognizerSession session = sessionRef.get();
+                Listening session = sessionRef.get();
                 return session != null && session.isPaused();
             }
 
             @Override
             public void setPaused(boolean paused) {
-                RecognizerSession session = sessionRef.get();
+                Listening session = sessionRef.get();
                 if (session == null) return;
                 if (paused) session.pause();
                 else session.resume();
@@ -479,6 +642,8 @@ public final class Main {
                   --rate=16000          частота дискретизации
                   --no-ui               без окна, только терминал
                   --no-translate        только расшифровка, без перевода
+                  --engine=gemini       чем слушать речь: gemini или yandex
+                  --chunk-seconds=10    предел длины куска звука для Gemini
                   --no-llm              переводить обычным переводчиком, без модели
                   --merge-words=25      сколько слов копить перед переводом
                   --merge-quiet=1800    сколько ждать продолжения фразы, мс

@@ -5,6 +5,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.mikeasm.livetranslator.Config;
+import com.mikeasm.livetranslator.Http;
 import com.mikeasm.livetranslator.Settings;
 
 import java.io.IOException;
@@ -84,15 +85,15 @@ public final class AssemblyAiEngine implements AsrEngine {
             return all.isBlank() ? List.of() : List.of(new Transcript.Segment(0, all, language));
         }
 
-        List<Http.Word> parsed = new ArrayList<>();
+        List<Words.Word> parsed = new ArrayList<>();
         for (JsonElement element : words) {
             JsonObject word = element.getAsJsonObject();
             // Времена уже в миллисекундах.
-            parsed.add(new Http.Word(ElevenLabsEngine.text(word, "text"),
+            parsed.add(new Words.Word(ElevenLabsEngine.text(word, "text"),
                     ElevenLabsEngine.seconds(word, "start"),
                     ElevenLabsEngine.seconds(word, "end")));
         }
-        return Http.groupWords(parsed, language);
+        return Words.group(parsed, language);
     }
 
     private JsonObject awaitResult(Map<String, String> auth, String id)

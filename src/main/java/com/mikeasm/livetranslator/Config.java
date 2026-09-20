@@ -43,11 +43,28 @@ public final class Config {
     public static final boolean DEFAULT_USE_LLM = true;
     public static final String DEFAULT_LLM_MODEL = "yandexgpt/latest";
 
+    /** Чем слушать речь: {@code gemini} или {@code yandex}. */
+    public static final String DEFAULT_ENGINE = "gemini";
+    /**
+     * Какими кусками отправлять звук Gemini, секунды.
+     * <p>
+     * Отставание от живой речи складывается из длины куска и примерно четырёх
+     * секунд обработки, и от длины куска почти не зависит: десятисекундный
+     * обрабатывается столько же, сколько двадцатисекундный. Значит, мельче —
+     * быстрее. Но мельче и дороже: задание уезжает чаще, а на стыках кусков
+     * рвутся фразы. Десять секунд — середина, проверенная замером.
+     */
+    public static final int DEFAULT_CHUNK_SECONDS = 10;
+    public static final String DEFAULT_GEMINI_MODEL = "gemini-3.5-flash";
+    /** Размышления перед ответом: на расшифровке это трата времени и денег. */
+    public static final String DEFAULT_GEMINI_THINKING = "low";
+
     /** Имена настроек, которые правятся в окне и сбрасываются одной кнопкой. */
     private static final String[] TUNING_KEYS = {
             "LT_PAUSE_MS", "LT_EOU_HIGH", "LT_LITERATURE", "LT_MAX_PHRASE",
             "LT_VAD_THRESHOLD", "LT_VAD_AUTO", "LT_MERGE_WORDS", "LT_MERGE_QUIET_MS",
-            "LT_LLM", "LT_LLM_MODEL",
+            "LT_LLM", "LT_LLM_MODEL", "LT_CHUNK_SECONDS", "LT_GEMINI_MODEL",
+            "LT_GEMINI_THINKING",
     };
 
     /** Api-Key сервисного аккаунта (YC_API_KEY). */
@@ -99,6 +116,13 @@ public final class Config {
     private volatile int mergeWords;
     /** Сколько ждать продолжения фразы, мс. */
     private volatile long mergeQuietMs;
+    /** Чем слушать речь: gemini или yandex. */
+    private volatile String engine;
+    /** Длина куска звука для Gemini, секунды. */
+    private volatile int chunkSeconds;
+    private volatile String geminiModel;
+    private volatile String geminiThinking;
+
     /** Путь к файлу словаря терминов. */
     public final String glossaryPath;
     /** Истина, если путь задан пользователем: тогда отсутствие файла — ошибка. */
@@ -151,6 +175,13 @@ public final class Config {
         this.literature = a.containsKey("no-literature")
                 ? false : Boolean.parseBoolean(settingOr("LT_LITERATURE",
                         String.valueOf(DEFAULT_LITERATURE)));
+        this.engine = a.containsKey("engine")
+                ? a.get("engine").trim().toLowerCase()
+                : settingOr("LT_ENGINE", DEFAULT_ENGINE).toLowerCase();
+        this.chunkSeconds = Integer.parseInt(a.getOrDefault("chunk-seconds",
+                settingOr("LT_CHUNK_SECONDS", String.valueOf(DEFAULT_CHUNK_SECONDS))));
+        this.geminiModel = settingOr("LT_GEMINI_MODEL", DEFAULT_GEMINI_MODEL);
+        this.geminiThinking = settingOr("LT_GEMINI_THINKING", DEFAULT_GEMINI_THINKING);
         this.glossaryExplicit = a.containsKey("glossary");
         this.glossaryPath = a.containsKey("glossary")
                 ? a.get("glossary") : AppPaths.glossaryFile().toString();
@@ -213,6 +244,47 @@ public final class Config {
         return llmModel;
     }
 
+    public String engine() {
+        return engine;
+    }
+
+    public boolean usesGemini() {
+        return "gemini".equals(engine);
+    }
+
+    /** Ключ Gemini: отдельный от яндексового, живёт там же, где остальные. */
+    public String geminiKey() {
+        return Settings.get("LT_GEMINI_KEY");
+    }
+
+    public int chunkSeconds() {
+        return chunkSeconds;
+    }
+
+    public String geminiModel() {
+        return geminiModel;
+    }
+
+    public String geminiThinking() {
+        return geminiThinking;
+    }
+
+    /** Переключает движок; применяется со следующего куска звука. */
+    public void setEngine(String engine) {
+        this.engine = engine;
+        Settings.save("LT_ENGINE", engine);
+    }
+
+    /** Применяет и запоминает настройки Gemini. */
+    public void setGeminiTuning(int chunkSeconds, String model, String thinking) {
+        this.chunkSeconds = chunkSeconds;
+        this.geminiModel = model.isBlank() ? DEFAULT_GEMINI_MODEL : model;
+        this.geminiThinking = thinking;
+        Settings.save("LT_CHUNK_SECONDS", String.valueOf(chunkSeconds));
+        Settings.save("LT_GEMINI_MODEL", this.geminiModel);
+        Settings.save("LT_GEMINI_THINKING", thinking);
+    }
+
     public int mergeWords() {
         return mergeWords;
     }
@@ -237,6 +309,14 @@ public final class Config {
         Settings.save("LT_LITERATURE", String.valueOf(literature));
         Settings.save("LT_MAX_PHRASE", String.valueOf(maxPhraseSeconds));
         Settings.save("LT_VAD_THRESHOLD", String.valueOf(vadThreshold));
+    }
+
+    /** Порог тишины нужен обоим движкам — он про звук, а не про распознавание. */
+    public void setVadTuning(double threshold, boolean auto) {
+        this.vadThreshold = threshold;
+        this.vadAuto = auto;
+        Settings.save("LT_VAD_THRESHOLD", String.valueOf(threshold));
+        Settings.save("LT_VAD_AUTO", String.valueOf(auto));
     }
 
     /** Применяет и запоминает настройки перевода. */
@@ -270,6 +350,9 @@ public final class Config {
         this.mergeQuietMs = DEFAULT_MERGE_QUIET_MS;
         this.useLlm = DEFAULT_USE_LLM;
         this.llmModel = DEFAULT_LLM_MODEL;
+        this.chunkSeconds = DEFAULT_CHUNK_SECONDS;
+        this.geminiModel = DEFAULT_GEMINI_MODEL;
+        this.geminiThinking = DEFAULT_GEMINI_THINKING;
         for (String key : TUNING_KEYS) Settings.save(key, "");
     }
 

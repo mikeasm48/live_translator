@@ -107,6 +107,9 @@ public final class SessionLog implements TranscriptView, AutoCloseable {
         String by = entry.by() == null ? "" : entry.by().label();
         if (language.isBlank() && by.isBlank()) return "";
         if (by.isBlank()) return " `" + language + "`";
+        // Gemini слушает звук и языковой метки не даёт — стрелке не от чего
+        // отталкиваться, остаётся сказать только, чем переведено.
+        if (language.isBlank()) return " `" + by + "`";
         return " `" + language + " → " + by + "`";
     }
 
