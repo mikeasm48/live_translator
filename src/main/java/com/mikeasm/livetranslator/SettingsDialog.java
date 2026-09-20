@@ -45,25 +45,84 @@ public final class SettingsDialog {
         LANGUAGES.put("de-DE", "немецкий");
     }
 
+    /**
+     * Вкладка умеет применить свои изменения.
+     * <p>
+     * Кнопки живут в окне, а не внутри вкладок: иначе на каждой оказывается
+     * свой «Сохранить», а привычных «ОК» и «Закрыть» нет вовсе.
+     *
+     * @return ложь, если значения неверны и окно закрывать нельзя
+     */
+    private interface Applier {
+        boolean apply();
+    }
+
     private SettingsDialog() {}
 
     /** @param onRecognitionChanged перезапускает распознавание с новыми настройками */
     public static void show(Frame owner, Config config, Runnable onRecognitionChanged) {
         JDialog dialog = new JDialog(owner, "Настройки", true);
+        dialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
+
+        List<Applier> appliers = new ArrayList<>();
         JTabbedPane tabs = new JTabbedPane();
-        tabs.addTab("Языки", languagesTab(config, onRecognitionChanged));
-        tabs.addTab("Качество", tuningTab(config, onRecognitionChanged));
-        tabs.addTab("Доступ", accessTab(config));
-        tabs.addTab("Файлы", filesTab());
+        tabs.addTab("Языки", languagesTab(config, onRecognitionChanged, appliers));
+        tabs.addTab("Качество", tuningTab(config, onRecognitionChanged, appliers));
+        tabs.addTab("Доступ", accessTab(config, appliers));
+        tabs.addTab("Файлы", filesTab(appliers));
         tabs.addTab("Звук из созвона", blackHoleTab());
 
-        dialog.setContentPane(tabs);
-        dialog.setSize(620, 460);
+        JPanel root = new JPanel(new BorderLayout());
+        root.add(tabs, BorderLayout.CENTER);
+        root.add(buttons(dialog, appliers), BorderLayout.SOUTH);
+
+        dialog.setContentPane(root);
+        // Escape закрывает окно — привычка сильнее любой кнопки.
+        root.registerKeyboardAction(e -> dialog.dispose(),
+                javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_ESCAPE, 0),
+                JPanel.WHEN_IN_FOCUSED_WINDOW);
+
+        dialog.setSize(640, 520);
         dialog.setLocationRelativeTo(owner);
         dialog.setVisible(true);
     }
 
-    private static JPanel languagesTab(Config config, Runnable onChanged) {
+    private static JPanel buttons(JDialog dialog, List<Applier> appliers) {
+        JPanel row = new JPanel();
+        row.setLayout(new BoxLayout(row, BoxLayout.X_AXIS));
+        row.setBorder(BorderFactory.createEmptyBorder(10, 14, 12, 14));
+
+        JButton close = new JButton("Закрыть");
+        close.addActionListener(e -> dialog.dispose());
+
+        JButton apply = new JButton("Применить");
+        apply.addActionListener(e -> applyAll(appliers));
+
+        JButton ok = new JButton("ОК");
+        ok.addActionListener(e -> {
+            if (applyAll(appliers)) dialog.dispose();
+        });
+        dialog.getRootPane().setDefaultButton(ok);
+
+        row.add(Box.createHorizontalGlue());
+        row.add(close);
+        row.add(Box.createHorizontalStrut(8));
+        row.add(apply);
+        row.add(Box.createHorizontalStrut(8));
+        row.add(ok);
+        return row;
+    }
+
+    /** Применяет все вкладки; несохранённое на соседней не должно пропасть. */
+    private static boolean applyAll(List<Applier> appliers) {
+        for (Applier applier : appliers) {
+            if (!applier.apply()) return false;
+        }
+        return true;
+    }
+
+    private static JPanel languagesTab(Config config, Runnable onChanged,
+                                       List<Applier> appliers) {
         JPanel panel = new JPanel();
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
         panel.setBorder(BorderFactory.createEmptyBorder(16, 18, 16, 18));
@@ -95,27 +154,22 @@ public final class SettingsDialog {
         targetRow.add(Box.createHorizontalGlue());
         panel.add(targetRow);
 
-        panel.add(Box.createVerticalStrut(16));
-        JButton save = new JButton("Сохранить");
-        save.setAlignmentX(0);
-        save.addActionListener(e -> {
+        appliers.add(() -> {
             List<String> chosen = boxes.stream()
                     .filter(JCheckBox::isSelected)
                     .map(box -> (String) box.getClientProperty("code"))
                     .toList();
             if (chosen.isEmpty()) {
                 JOptionPane.showMessageDialog(null, "Нужен хотя бы один язык.");
-                return;
+                return false;
             }
+            boolean changed = !chosen.equals(config.sourceLangs());
             config.setSourceLangs(chosen);
             Settings.save("LT_LANGS", String.join(",", chosen));
             Settings.save("LT_TARGET", targetField.getText().trim());
-            onChanged.run();
-            JOptionPane.showMessageDialog(null,
-                    "Сохранено: " + String.join(", ", chosen)
-                    + "\nЯзык перевода применится после перезапуска.");
+            if (changed) onChanged.run();
+            return true;
         });
-        panel.add(save);
         panel.add(Box.createVerticalGlue());
         return panel;
     }
@@ -128,7 +182,8 @@ public final class SettingsDialog {
      * Поэтому крутятся на ходу, без перезапуска: изменение настроек
      * распознавания пересоздаёт поток, остальное подхватывается само.
      */
-    private static JPanel tuningTab(Config config, Runnable onRecognitionChanged) {
+    private static JPanel tuningTab(Config config, Runnable onRecognitionChanged,
+                                    List<Applier> appliers) {
         JPanel panel = new JPanel();
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
         panel.setBorder(BorderFactory.createEmptyBorder(14, 18, 14, 18));
@@ -173,8 +228,7 @@ public final class SettingsDialog {
         buttons.setLayout(new BoxLayout(buttons, BoxLayout.X_AXIS));
         buttons.setAlignmentX(0);
 
-        JButton save = new JButton("Применить");
-        save.addActionListener(e -> {
+        appliers.add(() -> {
             try {
                 config.setRecognitionTuning(
                         Integer.parseInt(pause.getText().trim()),
@@ -189,11 +243,12 @@ public final class SettingsDialog {
                         useLlm.isSelected(),
                         model.getText().trim());
             } catch (NumberFormatException ex) {
-                JOptionPane.showMessageDialog(null, "Числовое поле заполнено неверно.");
-                return;
+                JOptionPane.showMessageDialog(null,
+                        "Числовое поле заполнено неверно — проверьте вкладку «Качество».");
+                return false;
             }
             onRecognitionChanged.run();
-            JOptionPane.showMessageDialog(null, "Применено.");
+            return true;
         });
 
         JButton reset = new JButton("Сбросить к значениям по умолчанию");
@@ -211,11 +266,8 @@ public final class SettingsDialog {
             literature.setSelected(config.literature());
             useLlm.setSelected(config.useLlm());
             onRecognitionChanged.run();
-            JOptionPane.showMessageDialog(null, "Настройки возвращены к исходным.");
         });
 
-        buttons.add(save);
-        buttons.add(Box.createHorizontalStrut(10));
         buttons.add(reset);
         buttons.add(Box.createHorizontalGlue());
         panel.add(buttons);
@@ -265,7 +317,7 @@ public final class SettingsDialog {
         return row;
     }
 
-    private static JPanel accessTab(Config config) {
+    private static JPanel accessTab(Config config, List<Applier> appliers) {
         JPanel panel = new JPanel();
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
         panel.setBorder(BorderFactory.createEmptyBorder(16, 18, 16, 18));
@@ -290,45 +342,42 @@ public final class SettingsDialog {
         panel.add(folderField);
         panel.add(Box.createVerticalStrut(16));
 
-        JButton save = new JButton("Сохранить");
-        save.setAlignmentX(0);
-        save.addActionListener(e -> {
+        appliers.add(() -> {
             String folder = folderField.getText().trim();
             if (!folder.isEmpty() && !folder.equals(config.folderId)) {
                 String complaint = FirstRun.checkFolder(folder);
                 if (complaint != null) {
                     JOptionPane.showMessageDialog(null, complaint);
-                    return;
+                    return false;
                 }
                 Settings.save("YC_FOLDER_ID", folder);
             }
             char[] key = keyField.getPassword();
             try {
-                if (key.length > 0) {
-                    String complaint = FirstRun.checkKey(key);
-                    if (complaint != null) {
-                        JOptionPane.showMessageDialog(null, complaint);
-                        return;
-                    }
+                if (key.length == 0) return true;
+                String complaint = FirstRun.checkKey(key);
+                if (complaint != null) {
+                    JOptionPane.showMessageDialog(null, complaint);
+                    return false;
                 }
-                if (key.length > 0 && !FirstRun.changeKey(key)) {
+                if (!FirstRun.changeKey(key)) {
                     JOptionPane.showMessageDialog(null, "Ключ сохранить не удалось.");
-                    return;
+                    return false;
                 }
             } finally {
-                Arrays.fill(key, '\0');
+                Arrays.fill(key, ' ');
             }
             keyField.setText("");
             JOptionPane.showMessageDialog(null,
-                    "Сохранено. Доступы подхватятся при следующем запуске.");
+                    "Ключ сохранён. Он подхватится при следующем запуске.");
+            return true;
         });
-        panel.add(save);
         panel.add(Box.createVerticalGlue());
         return panel;
     }
 
     /** Показывает, где лежат файлы, и позволяет переназначить папку записей. */
-    private static JPanel filesTab() {
+    private static JPanel filesTab(List<Applier> appliers) {
         JPanel panel = new JPanel();
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
         panel.setBorder(BorderFactory.createEmptyBorder(16, 18, 16, 18));
@@ -386,29 +435,22 @@ public final class SettingsDialog {
         openConfig.addActionListener(e -> reveal(AppPaths.configDir()));
         panel.add(openConfig);
 
-        panel.add(Box.createVerticalStrut(18));
-        JButton save = new JButton("Сохранить");
-        save.setAlignmentX(0);
-        save.addActionListener(e -> {
+        appliers.add(() -> {
             java.nio.file.Path dir = AppPaths.expand(dirField.getText());
+            if (dir.equals(AppPaths.logsDir())) return true;
             try {
                 java.nio.file.Files.createDirectories(dir);
             } catch (java.io.IOException ex) {
-                JOptionPane.showMessageDialog(null, "Не удалось создать папку:\n" + ex.getMessage());
-                return;
+                JOptionPane.showMessageDialog(null,
+                        "Не удалось создать папку: " + ex.getMessage());
+                return false;
             }
-            // Пустое значение возвращает путь по умолчанию, а не пишет его в файл:
-            // так настройка переживёт переезд домашнего каталога.
-            if (dir.equals(AppPaths.defaultLogsDir())) {
-                Settings.save("LT_LOGS_DIR", "");
-            } else {
-                Settings.save("LT_LOGS_DIR", dir.toString());
-            }
-            JOptionPane.showMessageDialog(null,
-                    "Сохранено.\nЗаписи звука пойдут туда сразу, расшифровка — "
-                            + "со следующего запуска.");
+            // Пустое значение возвращает путь по умолчанию, а не пишет его в
+            // файл: так настройка переживёт переезд домашнего каталога.
+            Settings.save("LT_LOGS_DIR",
+                    dir.equals(AppPaths.defaultLogsDir()) ? "" : dir.toString());
+            return true;
         });
-        panel.add(save);
         panel.add(Box.createVerticalGlue());
         return panel;
     }
