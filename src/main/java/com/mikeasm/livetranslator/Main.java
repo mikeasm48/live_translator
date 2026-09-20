@@ -16,7 +16,7 @@ import java.util.concurrent.TimeUnit;
 public final class Main {
 
     /** Версия приложения — попадает в Info.plist значка. */
-    private static final String VERSION = "0.3.1";
+    private static final String VERSION = "0.3.2";
 
     public static void main(String[] args) throws Exception {
         Config parsed = Config.parse(args);
@@ -172,6 +172,7 @@ public final class Main {
             shutdown.countDown();
         }));
 
+        capture.onNotice(view::status);
         if (!capture.fallbackNotice().isBlank()) {
             view.status(capture.fallbackNotice());
         }
