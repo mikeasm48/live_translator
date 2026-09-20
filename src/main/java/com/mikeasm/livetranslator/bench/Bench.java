@@ -123,13 +123,19 @@ public final class Bench {
                 + (engine.priceNote().isBlank() ? "" : ", " + engine.priceNote()));
 
         long startedAt = System.currentTimeMillis();
+        List<Long> chunkTimes = new ArrayList<>();
         try {
             for (int i = 0; i < clips.size(); i++) {
                 AudioFile.Clip clip = clips.get(i);
                 System.out.print("   " + (i + 1) + "/" + clips.size() + "… ");
                 System.out.flush();
+                // Время на кусок важнее общего: в живом переводе именно оно
+                // становится задержкой, с которой человек сидит на встрече.
+                long startedChunkAt = System.currentTimeMillis();
                 asr.addAll(engine.transcribe(clip), clip.offsetMs());
-                System.out.println("услышано слов: " + asr.words());
+                long took = System.currentTimeMillis() - startedChunkAt;
+                chunkTimes.add(took);
+                System.out.printf("%.1f с, слов: %d%n", took / 1000.0, asr.words());
             }
         } catch (Exception e) {
             String reason = e.getMessage() == null ? e.toString() : e.getMessage();
@@ -137,6 +143,12 @@ public final class Bench {
             System.out.println("   сорвалось: " + reason);
         }
         asr.setElapsedMs(System.currentTimeMillis() - startedAt);
+        if (chunkTimes.size() > 1) {
+            long worst = chunkTimes.stream().mapToLong(Long::longValue).max().orElse(0);
+            long typical = chunkTimes.stream().sorted().toList().get(chunkTimes.size() / 2);
+            System.out.printf("   на кусок: обычно %.1f с, худший %.1f с%n",
+                    typical / 1000.0, worst / 1000.0);
+        }
 
         Transcript russian = asr.failed() || llmChannel == null || engine.alreadyTranslated()
                 ? null
@@ -238,6 +250,7 @@ public final class Bench {
                 new AzureEngine(config, false),
                 new GeminiEngine(config, false),
                 new GeminiEngine(config, true),
+                new GeminiEngine(config, true, true),
                 new ElevenLabsEngine(config),
                 new OpenAiEngine(config),
                 new AssemblyAiEngine(config));
@@ -299,7 +312,7 @@ public final class Bench {
                   google          Cloud STT v2 / Chirp       LT_GOOGLE_PROJECT и
                                                              LT_GOOGLE_TOKEN_CMD=gcloud auth print-access-token
                   azure           быстрая расшифровка        LT_AZURE_KEY + LT_AZURE_REGION
-                  azure-terms     то же с подсказкой         LT_AZURE_KEY + LT_AZURE_PHRASES
+                  azure-terms     то же с подсказкой         LT_AZURE_KEY + LT_BENCH_PHRASES
                                   ожидаемых терминов
                   azure-short     запасной путь Azure для    LT_AZURE_KEY + LT_AZURE_REGION
                                   коротких фрагментов; сам
@@ -307,6 +320,8 @@ public final class Bench {
                   gemini          дословная расшифровка      LT_GEMINI_KEY
                   gemini-ru       звук сразу в перевод,      LT_GEMINI_KEY
                                   без текста посередине
+                  gemini-ru-terms то же с подсказкой         LT_GEMINI_KEY + LT_BENCH_PHRASES
+                                  ожидаемых терминов
                   elevenlabs      Scribe                     LT_ELEVENLABS_KEY
                   openai          Whisper                    LT_OPENAI_KEY
                   assemblyai      отложенное распознавание   LT_ASSEMBLYAI_KEY

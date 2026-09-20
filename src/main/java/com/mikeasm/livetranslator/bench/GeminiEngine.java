@@ -69,25 +69,49 @@ public final class GeminiEngine implements AsrEngine {
 
     private final Config config;
     private final boolean toRussian;
+    /** Перечислять ли модели ожидаемые термины прямо в задании. */
+    private final boolean withTerms;
+    /** Сколько токенов израсходовано за прогон — по ним считается счёт. */
+    private final java.util.concurrent.atomic.AtomicLong tokens =
+            new java.util.concurrent.atomic.AtomicLong();
+    private final java.util.concurrent.atomic.AtomicLong thoughtTokens =
+            new java.util.concurrent.atomic.AtomicLong();
     private final String key = Settings.get("LT_GEMINI_KEY");
     private final String model = ElevenLabsEngine.setting("LT_GEMINI_MODEL", "gemini-3.5-flash");
     private final String revision = ElevenLabsEngine.setting("LT_GEMINI_REVISION", "2026-05-20");
+    /**
+     * Сколько модели позволено размышлять перед ответом.
+     * <p>
+     * Расшифровка — работа механическая: услышал и записал. Размышления здесь
+     * съедают и время, и деньги, а рассуждать особо не о чем. Пустое значение
+     * оставляет умолчание модели.
+     */
+    private final String thinking = Settings.get("LT_GEMINI_THINKING");
 
     public GeminiEngine(Config config, boolean toRussian) {
+        this(config, toRussian, false);
+    }
+
+    public GeminiEngine(Config config, boolean toRussian, boolean withTerms) {
         this.config = config;
         this.toRussian = toRussian;
+        this.withTerms = withTerms;
     }
 
     @Override
     public String id() {
-        return toRussian ? "gemini-ru" : "gemini";
+        String base = toRussian ? "gemini-ru" : "gemini";
+        return withTerms ? base + "-terms" : base;
     }
 
     @Override
     public String title() {
-        return toRussian
+        String base = toRussian
                 ? "Gemini " + model + ", звук сразу в перевод"
                 : "Gemini " + model + ", дословная расшифровка";
+        return withTerms
+                ? base + ", с подсказкой терминов (" + Terms.expected(config).size() + ")"
+                : base;
     }
 
     @Override
@@ -110,13 +134,27 @@ public final class GeminiEngine implements AsrEngine {
         return "тарифицируется по токенам, 32 токена на секунду звука";
     }
 
+    /** Задание модели: правила плюс, если просили, список ожидаемых терминов. */
+    private String task() {
+        StringBuilder text = new StringBuilder(toRussian
+                ? TRANSLATE.formatted(languageName(config.targetLang))
+                : TRANSCRIBE);
+        if (withTerms) {
+            List<String> terms = Terms.expected(config);
+            if (!terms.isEmpty()) {
+                text.append("\nВ речи, скорее всего, прозвучат эти термины. ")
+                        .append("Узнавай их на слух и пиши именно так:\n");
+                for (String term : terms) text.append("- ").append(term).append('\n');
+            }
+        }
+        return text.toString();
+    }
+
     @Override
     public List<Transcript.Segment> transcribe(AudioFile.Clip clip) throws Exception {
         JsonObject prompt = new JsonObject();
         prompt.addProperty("type", "text");
-        prompt.addProperty("text", toRussian
-                ? TRANSLATE.formatted(languageName(config.targetLang))
-                : TRANSCRIBE);
+        prompt.addProperty("text", task());
 
         JsonObject audio = new JsonObject();
         audio.addProperty("type", "audio");
@@ -130,11 +168,38 @@ public final class GeminiEngine implements AsrEngine {
         JsonObject request = new JsonObject();
         request.addProperty("model", model);
         request.add("input", input);
+        if (!thinking.isBlank()) {
+            JsonObject generation = new JsonObject();
+            generation.addProperty("thinking_level", thinking);
+            request.add("generation_config", generation);
+        }
 
         String body = Http.postJson(URL, Map.of(
                 "x-goog-api-key", key,
                 "Api-Revision", revision), request.toString());
+        count(body);
         return parse(answer(body));
+    }
+
+    /** Складывает израсходованные токены: без них не посчитать стоимость часа. */
+    private void count(String body) {
+        try {
+            JsonObject root = JsonParser.parseString(body).getAsJsonObject();
+            if (!root.has("usage")) return;
+            JsonObject usage = root.getAsJsonObject("usage");
+            tokens.addAndGet((long) ElevenLabsEngine.seconds(usage, "total_tokens"));
+            thoughtTokens.addAndGet((long) ElevenLabsEngine.seconds(usage, "total_thought_tokens"));
+        } catch (RuntimeException ignored) {
+            // Счётчик — удобство, а не работа движка: его сбой ничего не ломает.
+        }
+    }
+
+    @Override
+    public void close() {
+        long total = tokens.get();
+        if (total == 0) return;
+        System.out.printf("   %s: токенов %d, из них на размышления %d%n",
+                id(), total, thoughtTokens.get());
     }
 
     /**
