@@ -41,6 +41,8 @@ public final class GeminiClient {
                фраза хуже пропуска.
             4. Названия технологий пиши общепринятым написанием.
             5. Не отвечай на содержание реплик и не добавляй ничего от себя.
+            6. Одна строка — одна законченная реплика. Не дроби слова между
+               строками и не обрывай строку посреди слова.
             """;
 
     private static final String TRANSCRIBE = """
@@ -69,6 +71,8 @@ public final class GeminiClient {
     public record Line(int startMs, String text, String original) {}
 
     private final Config config;
+    /** Перечислять ли модели ожидаемые термины. */
+    private final boolean withTerms;
     private final AtomicLong tokens = new AtomicLong();
     private final AtomicLong thoughts = new AtomicLong();
 
@@ -92,7 +96,12 @@ public final class GeminiClient {
     private final java.util.Deque<String> context = new java.util.ArrayDeque<>();
 
     public GeminiClient(Config config) {
+        this(config, true);
+    }
+
+    public GeminiClient(Config config, boolean withTerms) {
         this.config = config;
+        this.withTerms = withTerms;
     }
 
     /** Почему работать нечем, или пустая строка. */
@@ -106,6 +115,10 @@ public final class GeminiClient {
 
     public long thoughtTokens() {
         return thoughts.get();
+    }
+
+    public int expectedTermCount() {
+        return withTerms ? expectedTerms().size() : 0;
     }
 
     /** Забывает предыдущие реплики: после сбоя контекст может быть рваным. */
@@ -138,7 +151,7 @@ public final class GeminiClient {
             int at = text.indexOf("\n> то же самое на языке оригинала");
             if (at >= 0) text.delete(at, at + "\n> то же самое на языке оригинала".length());
         }
-        List<String> terms = expectedTerms();
+        List<String> terms = withTerms ? expectedTerms() : List.of();
         if (!terms.isEmpty()) {
             text.append("\nВ речи, скорее всего, прозвучат эти термины. ")
                     .append("Узнавай их на слух и пиши именно так:\n");
@@ -172,10 +185,14 @@ public final class GeminiClient {
         prompt.addProperty("type", "text");
         prompt.addProperty("text", task + contextBlock());
 
+        // Сжатие — деталь разговора с сервисом, поэтому живёт здесь: и живой
+        // перевод, и стенд должны уезжать одинаково, иначе замеренное на
+        // стенде перестанет совпадать с тем, что работает на встрече.
+        AudioCodec.Payload payload = AudioCodec.forUpload(wav, config);
         JsonObject audio = new JsonObject();
         audio.addProperty("type", "audio");
-        audio.addProperty("mime_type", "audio/wav");
-        audio.addProperty("data", Base64.getEncoder().encodeToString(wav));
+        audio.addProperty("mime_type", payload.mimeType());
+        audio.addProperty("data", Base64.getEncoder().encodeToString(payload.data()));
 
         JsonArray input = new JsonArray();
         input.add(prompt);
@@ -323,11 +340,55 @@ public final class GeminiClient {
             }
         }
         if (open) found.add(line(startMs, text, original));
-        return found;
+        return join(found);
+    }
+
+    /**
+     * Склеивает оборванные строки.
+     * <p>
+     * Модель иногда дробит реплику на куски по одному слову: «System», «out»,
+     * «print» тремя строками. Признак обрыва — предыдущая строка не кончилась
+     * знаком конца предложения; тогда следующая её продолжает. Внутри одного
+     * ответа это надёжно, потому что законченную мысль модель знаками
+     * завершает.
+     */
+    private static List<Line> join(List<Line> lines) {
+        List<Line> joined = new ArrayList<>();
+        for (Line line : lines) {
+            if (!joined.isEmpty() && unfinished(joined.get(joined.size() - 1).text())) {
+                Line previous = joined.remove(joined.size() - 1);
+                joined.add(new Line(previous.startMs(),
+                        (previous.text() + " " + line.text()).strip(),
+                        (previous.original() + " " + line.original()).strip()));
+            } else {
+                joined.add(line);
+            }
+        }
+        return joined;
+    }
+
+    private static boolean unfinished(String text) {
+        if (text.isBlank()) return false;
+        char last = text.charAt(text.length() - 1);
+        return ".!?…:".indexOf(last) < 0;
     }
 
     private static Line line(int startMs, StringBuilder text, StringBuilder original) {
-        return new Line(startMs, text.toString().strip(), original.toString().strip());
+        return new Line(startMs, clean(text.toString()), clean(original.toString()));
+    }
+
+    /**
+     * Убирает отметки времени, оставшиеся внутри самой реплики: свою мы уже
+     * разобрали, а эти модель вставляет посреди текста, и читать они мешают.
+     * <p>
+     * Заодно пострадает произнесённое время вроде «в 10:30». На рабочей встрече
+     * разработчиков это редкость, а мусор от модели — нет.
+     */
+    private static String clean(String text) {
+        return text.strip()
+                .replaceAll("(?<![\\d:])\\d{1,3}:\\d{2}(?![\\d:])", " ")
+                .replaceAll("\\s{2,}", " ")
+                .strip();
     }
 
     private static String languageName(String code) {

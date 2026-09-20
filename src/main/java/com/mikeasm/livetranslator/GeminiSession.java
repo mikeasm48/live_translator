@@ -59,6 +59,26 @@ public final class GeminiSession implements AutoCloseable {
     private final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
     private final AtomicLong nextId = new AtomicLong();
 
+    /**
+     * Незаконченная реплика с прошлого куска: её продолжение придёт со
+     * следующим. Человеку нужна целая фраза, а не три обрывка с отметками
+     * времени, поэтому продолжение дописывается к той же строке.
+     */
+    private volatile long openId = -1;
+    private volatile String openText = "";
+    private volatile String openOriginal = "";
+    /** Сколько раз подряд дописывали к этой же строке. */
+    private volatile int extensions;
+
+    /**
+     * Дальше этого реплику не наращиваем.
+     * <p>
+     * Знак конца предложения модель ставит не всегда, и без предела одна строка
+     * может расти всю встречу, слипаясь в нечитаемое полотно. Три куска — это
+     * полминуты речи, законченная мысль в них помещается.
+     */
+    private static final int MAX_EXTENSIONS = 2;
+
     /** Сколько миллисекунд подряд стоит тишина. */
     private int silenceRunMs;
     /** Была ли в накопленном хоть какая-то речь: тишину отправлять незачем. */
@@ -132,8 +152,7 @@ public final class GeminiSession implements AutoCloseable {
                         client.translate(wav(pcm, config.sampleRate), true);
                 for (GeminiClient.Line line : lines) {
                     if (line.text().isBlank()) continue;
-                    listener.line(nextId.getAndIncrement(),
-                            TextCleanup.collapseRepeats(line.original()),
+                    emit(TextCleanup.collapseRepeats(line.original()),
                             TextCleanup.collapseRepeats(line.text()));
                 }
             } catch (Exception e) {
@@ -144,6 +163,44 @@ public final class GeminiSession implements AutoCloseable {
                 client.resetConversation();
             }
         });
+    }
+
+    /**
+     * Отдаёт реплику наружу, дописывая её к начатой, если та не закончена.
+     * <p>
+     * Признак незаконченности — реплика не кончается знаком конца предложения.
+     * Такая почти наверняка оборвана границей куска, а не говорящим.
+     * Продолжение уходит под тем же номером: и окно, и расшифровка обновляют
+     * строку на месте, вместо того чтобы плодить огрызки.
+     */
+    private synchronized void emit(String original, String text) {
+        if (openId >= 0) {
+            String joinedText = (openText + " " + text).strip();
+            String joinedOriginal = (openOriginal + " " + original).strip();
+            listener.line(openId, joinedOriginal, joinedText);
+            extensions++;
+            if (finished(joinedText) || extensions >= MAX_EXTENSIONS) {
+                openId = -1;
+            } else {
+                openText = joinedText;
+                openOriginal = joinedOriginal;
+            }
+            return;
+        }
+        long id = nextId.getAndIncrement();
+        listener.line(id, original, text);
+        if (!finished(text)) {
+            openId = id;
+            openText = text;
+            openOriginal = original;
+            extensions = 0;
+        }
+    }
+
+    private static boolean finished(String text) {
+        if (text.isBlank()) return true;
+        char last = text.charAt(text.length() - 1);
+        return ".!?…".indexOf(last) >= 0;
     }
 
     public void pause() {

@@ -56,8 +56,23 @@ public final class Config {
      */
     public static final int DEFAULT_CHUNK_SECONDS = 10;
     public static final String DEFAULT_GEMINI_MODEL = "gemini-3.5-flash";
-    /** Размышления перед ответом: на расшифровке это трата времени и денег. */
-    public static final String DEFAULT_GEMINI_THINKING = "low";
+    /**
+     * Размышления перед ответом.
+     * <p>
+     * На расшифровке это трата времени и денег: задача механическая, услышал и
+     * записал, рассуждать не о чем. Замерено на узбекской записи — с
+     * {@code minimal} кусок обрабатывается 1,6 с против 1,7 с на {@code low} и
+     * около 10 с без ограничения, а термины узнаются те же самые.
+     */
+    public static final String DEFAULT_GEMINI_THINKING = "minimal";
+    /**
+     * Битрейт сжатия звука перед отправкой, бит/с.
+     * <p>
+     * Выбран замером: на 32 кбит/с расшифровка неотличима от сырого звука, на
+     * 16 начинает врать. Уменьшать дальше и нечего — на таком размере канал
+     * перестаёт быть узким местом.
+     */
+    public static final int DEFAULT_AUDIO_BITRATE = 32000;
 
     /** Имена настроек, которые правятся в окне и сбрасываются одной кнопкой. */
     private static final String[] TUNING_KEYS = {
@@ -267,6 +282,20 @@ public final class Config {
 
     public String geminiThinking() {
         return geminiThinking;
+    }
+
+    /** Сжимать ли звук перед отправкой. Выключается, если кодировщик подводит. */
+    public boolean compressAudio() {
+        return Boolean.parseBoolean(settingOr("LT_COMPRESS_AUDIO", "true"));
+    }
+
+    public int audioBitrate() {
+        try {
+            return Integer.parseInt(settingOr("LT_AUDIO_BITRATE",
+                    String.valueOf(DEFAULT_AUDIO_BITRATE)));
+        } catch (NumberFormatException e) {
+            return DEFAULT_AUDIO_BITRATE;
+        }
     }
 
     /** Переключает движок; применяется со следующего куска звука. */

@@ -64,9 +64,14 @@ public final class SessionLog implements TranscriptView, AutoCloseable {
 
     @Override
     public synchronized void translation(long id, String translated, TranslatedBy by) {
-        Entry entry = pending.remove(id);
+        Entry entry = pending.get(id);
         if (entry == null) return;
-        write(new Entry(entry.time(), entry.source(), translated, entry.language(), by));
+        // Не пишем сразу: фраза может быть ещё не закончена. Gemini отдаёт
+        // начало фразы в одном куске звука, а конец в следующем, и дописывает
+        // его к той же реплике. Запись происходит, когда приходит следующая
+        // реплика или закрывается сессия, — тогда правок больше не будет.
+        pending.put(id, new Entry(entry.time(), entry.source(), translated,
+                entry.language(), by));
     }
 
     @Override
