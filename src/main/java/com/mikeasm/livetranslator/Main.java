@@ -16,7 +16,7 @@ import java.util.concurrent.TimeUnit;
 public final class Main {
 
     /** Версия приложения — попадает в Info.plist значка. */
-    private static final String VERSION = "0.3.5";
+    private static final String VERSION = "0.3.6";
 
     public static void main(String[] args) throws Exception {
         Config parsed = Config.parse(args);

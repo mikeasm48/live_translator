@@ -48,7 +48,9 @@ public final class LlmTranslator {
             4. Ничего не пропускай: каждая понятная часть должна попасть в перевод.
             5. Не достраивай оборванные фразы: переведи то, что есть, и оборви так же.
             6. Не отвечай на содержание реплики и не добавляй ничего от себя.
-            7. В ответе — только перевод, без пояснений и кавычек.
+            7. Язык реплики указан по догадке распознавания и бывает неверным:
+               если текст явно на другом языке, верь тексту, а не метке.
+            8. В ответе — только перевод, без пояснений и кавычек.
             """;
 
     private final TextGenerationServiceGrpc.TextGenerationServiceBlockingStub stub;
@@ -107,7 +109,11 @@ public final class LlmTranslator {
             prompt.append('\n');
         }
         prompt.append("Переведи эту реплику");
-        if (!sourceLang.isBlank()) prompt.append(" (язык: ").append(sourceLang).append(")");
+        // Метка — предположение распознавания, а не факт. Подаём её именно так,
+        // иначе неверно определённый язык уводит перевод за собой.
+        if (!sourceLang.isBlank()) {
+            prompt.append(" (распознавание предполагает язык ").append(sourceLang).append(")");
+        }
         prompt.append(":\n").append(text);
         return prompt.toString();
     }
