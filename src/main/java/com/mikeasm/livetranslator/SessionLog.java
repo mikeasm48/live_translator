@@ -52,6 +52,12 @@ public final class SessionLog implements TranscriptView, AutoCloseable {
 
     @Override
     public synchronized void phrase(long id, String source, String language) {
+        phrase(id, source, language, LocalDateTime.now().toLocalTime());
+    }
+
+    @Override
+    public synchronized void phrase(long id, String source, String language,
+                                    java.time.LocalTime spokenAt) {
         Entry existing = pending.get(id);
         if (existing != null) {
             pending.put(id, new Entry(existing.time(), source, existing.translated(), language,
@@ -59,7 +65,7 @@ public final class SessionLog implements TranscriptView, AutoCloseable {
             return;
         }
         flushAllExcept(id);
-        pending.put(id, new Entry(LocalDateTime.now().format(TIME), source, null, language, null));
+        pending.put(id, new Entry(spokenAt.format(TIME), source, null, language, null));
     }
 
     @Override
