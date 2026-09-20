@@ -27,7 +27,18 @@ public final class Config {
     public static final int DEFAULT_MAX_PHRASE_SECONDS = 25;
     public static final double DEFAULT_VAD_THRESHOLD = 180;
     public static final boolean DEFAULT_VAD_AUTO = true;
-    public static final int DEFAULT_MERGE_WORDS = 14;
+    /**
+     * Сколько слов копить перед отправкой на перевод.
+     * <p>
+     * Выбрано не по качеству перевода, а по счёту за облако. С каждым вызовом
+     * модели заново уезжает инструкция, словарь терминов и контекст — около
+     * 1700 знаков служебного текста на 150 знаков полезных. По замеру за
+     * 20.09.2026 входящие токены стоили 104 ₽ против 4 ₽ исходящих: платим за
+     * конверт, а не за письмо. Вдвое более крупные куски означают вдвое меньше
+     * конвертов, и перевод от этого скорее выигрывает — модель видит за раз
+     * больше связной речи. Плата — задержка: реплика появляется позже.
+     */
+    public static final int DEFAULT_MERGE_WORDS = 25;
     public static final long DEFAULT_MERGE_QUIET_MS = 1800;
     public static final boolean DEFAULT_USE_LLM = true;
     public static final String DEFAULT_LLM_MODEL = "yandexgpt/latest";

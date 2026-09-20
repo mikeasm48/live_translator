@@ -326,11 +326,11 @@ public final class Main {
         if (isTargetLanguage(lang, config.targetLang)) {
             // Говорят на языке перевода — переводить нечего. Лишний вызов
             // стоил бы денег и портил бы формулировки.
-            view.translation(id, text);
+            view.translation(id, text, TranslatedBy.SOURCE);
             return;
         }
         translator.translate(text, lang,
-                ru -> view.translation(id, TextCleanup.collapseRepeats(ru)),
+                (ru, by) -> view.translation(id, TextCleanup.collapseRepeats(ru), by),
                 error -> view.status("перевод не удался: " + error));
     }
 
@@ -394,7 +394,7 @@ public final class Main {
             Thread.sleep(600);
             view.phrase(i, phrases[i][0], "uz-UZ");
             Thread.sleep(500);
-            view.translation(i, phrases[i][1]);
+            view.translation(i, phrases[i][1], TranslatedBy.MODEL);
             Thread.sleep(700);
         }
         if (config.showUi) {
@@ -417,8 +417,8 @@ public final class Main {
             }
 
             @Override
-            public void translation(long id, String translated) {
-                views.forEach(v -> safely(() -> v.translation(id, translated)));
+            public void translation(long id, String translated, TranslatedBy by) {
+                views.forEach(v -> safely(() -> v.translation(id, translated, by)));
             }
 
             @Override
@@ -464,7 +464,7 @@ public final class Main {
                   --no-ui               без окна, только терминал
                   --no-translate        только расшифровка, без перевода
                   --no-llm              переводить обычным переводчиком, без модели
-                  --merge-words=14      сколько слов копить перед переводом
+                  --merge-words=25      сколько слов копить перед переводом
                   --merge-quiet=1800    сколько ждать продолжения фразы, мс
                   --glossary=путь       словарь терминов (по умолчанию ./glossary.txt)
                   --try="фраза"         перевести фразу без словаря и со словарём

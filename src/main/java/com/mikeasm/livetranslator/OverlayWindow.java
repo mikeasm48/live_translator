@@ -453,7 +453,7 @@ public final class OverlayWindow implements TranscriptView {
     }
 
     @Override
-    public void translation(long id, String translated) {
+    public void translation(long id, String translated, TranslatedBy by) {
         SwingUtilities.invokeLater(() -> {
             int index = indexOf(id);
             if (index < 0) return;

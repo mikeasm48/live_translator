@@ -27,7 +27,8 @@ public final class SessionLog implements TranscriptView, AutoCloseable {
     private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("HH:mm:ss");
     private static final String NL = System.lineSeparator();
 
-    private record Entry(String time, String source, String translated, String language) {}
+    private record Entry(String time, String source, String translated, String language,
+                         TranslatedBy by) {}
 
     private final Writer writer;
     private final Path path;
@@ -53,18 +54,19 @@ public final class SessionLog implements TranscriptView, AutoCloseable {
     public synchronized void phrase(long id, String source, String language) {
         Entry existing = pending.get(id);
         if (existing != null) {
-            pending.put(id, new Entry(existing.time(), source, existing.translated(), language));
+            pending.put(id, new Entry(existing.time(), source, existing.translated(), language,
+                    existing.by()));
             return;
         }
         flushAllExcept(id);
-        pending.put(id, new Entry(LocalDateTime.now().format(TIME), source, null, language));
+        pending.put(id, new Entry(LocalDateTime.now().format(TIME), source, null, language, null));
     }
 
     @Override
-    public synchronized void translation(long id, String translated) {
+    public synchronized void translation(long id, String translated, TranslatedBy by) {
         Entry entry = pending.remove(id);
         if (entry == null) return;
-        write(new Entry(entry.time(), entry.source(), translated, entry.language()));
+        write(new Entry(entry.time(), entry.source(), translated, entry.language(), by));
     }
 
     @Override
@@ -82,17 +84,30 @@ public final class SessionLog implements TranscriptView, AutoCloseable {
     }
 
     private void write(Entry entry) {
-        String tag = entry.language() == null || entry.language().isBlank()
-                ? "" : " `" + entry.language() + "`";
         StringBuilder text = new StringBuilder("**").append(entry.time()).append("**")
-                .append(tag).append(" ");
-        if (entry.translated() == null) {
+                .append(tag(entry)).append(" ");
+        // Фраза на языке перевода не переводилась: писать один и тот же текст
+        // дважды незачем, это только мешает читать.
+        if (entry.translated() == null || entry.by() == TranslatedBy.SOURCE) {
             text.append(entry.source()).append(NL).append(NL);
         } else {
             text.append(entry.translated()).append(NL)
                     .append("> ").append(entry.source()).append(NL).append(NL);
         }
         writeRaw(text.toString());
+    }
+
+    /**
+     * Метка вида `uz-UZ → модель`: язык, на котором сказали, и чем перевели.
+     * По ней потом видно, сколько раз включался запасной переводчик, — иначе
+     * это остаётся догадкой при разборе счёта за облако.
+     */
+    private static String tag(Entry entry) {
+        String language = entry.language() == null ? "" : entry.language();
+        String by = entry.by() == null ? "" : entry.by().label();
+        if (language.isBlank() && by.isBlank()) return "";
+        if (by.isBlank()) return " `" + language + "`";
+        return " `" + language + " → " + by + "`";
     }
 
     private void writeRaw(String text) {
