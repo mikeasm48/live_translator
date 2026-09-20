@@ -5,6 +5,8 @@ import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
+import javax.swing.JComboBox;
+import javax.swing.JComponent;
 import javax.swing.JDialog;
 import javax.swing.JEditorPane;
 import javax.swing.JFileChooser;
@@ -188,6 +190,115 @@ public final class SettingsDialog {
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
         panel.setBorder(BorderFactory.createEmptyBorder(14, 18, 14, 18));
 
+        JComboBox<String> engine = new JComboBox<>(new String[]{ENGINE_GEMINI, ENGINE_YANDEX});
+        engine.setSelectedItem(config.usesGemini() ? ENGINE_GEMINI : ENGINE_YANDEX);
+        engine.setMaximumSize(new Dimension(220, 26));
+        panel.add(row("Чем слушать речь", engine, "применится при следующем запуске"));
+        panel.add(Box.createVerticalStrut(12));
+
+        appliers.add(() -> {
+            String chosen = ENGINE_GEMINI.equals(engine.getSelectedItem()) ? "gemini" : "yandex";
+            if (!chosen.equals(config.engine())) {
+                config.setEngine(chosen);
+                JOptionPane.showMessageDialog(null,
+                        "Движок сменится после перезапуска приложения.");
+            }
+            return true;
+        });
+
+        // Настройки у движков разные, и показывать чужие — значит предлагать
+        // крутить то, что ни на что не влияет.
+        panel.add(config.usesGemini()
+                ? geminiTuning(config, appliers)
+                : yandexTuning(config, onRecognitionChanged, appliers));
+        return panel;
+    }
+
+    private static final String ENGINE_GEMINI = "Gemini (Google)";
+    private static final String ENGINE_YANDEX = "Yandex SpeechKit";
+
+    /**
+     * Настройки Gemini.
+     * <p>
+     * Длина куска — главный размен. Отставание перевода складывается из длины
+     * куска и примерно четырёх секунд обработки, но кусок закрывается на первой
+     * же паузе после половины срока, поэтому на живой речи с паузами разница
+     * между десятью и двадцатью секундами невелика. Зато на докладчике без пауз
+     * она решает всё.
+     */
+    private static JPanel geminiTuning(Config config, List<Applier> appliers) {
+        JPanel panel = new JPanel();
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.setAlignmentX(0);
+
+        panel.add(note(
+                "Кусок звука закрывается на ближайшей паузе, а если пауз нет —",
+                "по пределу ниже. Короче куски — быстрее перевод, но дороже:",
+                "задание модели отправляется чаще."));
+        panel.add(Box.createVerticalStrut(12));
+
+        JComboBox<String> chunk = new JComboBox<>(new String[]{"10 секунд", "20 секунд"});
+        chunk.setSelectedItem(config.chunkSeconds() >= 20 ? "20 секунд" : "10 секунд");
+        chunk.setMaximumSize(new Dimension(130, 26));
+
+        JComboBox<String> thinking = new JComboBox<>(
+                new String[]{"minimal", "low", "medium", "high"});
+        thinking.setSelectedItem(config.geminiThinking().isBlank()
+                ? "low" : config.geminiThinking());
+        thinking.setMaximumSize(new Dimension(130, 26));
+
+        JTextField model = field(config.geminiModel(), 180);
+        JTextField vad = field(String.valueOf((int) config.vadThreshold()));
+        JCheckBox vadAuto = new JCheckBox("подбирать порог тишины автоматически",
+                config.vadAuto());
+        vadAuto.setAlignmentX(0);
+        vadAuto.addActionListener(e -> vad.setEnabled(!vadAuto.isSelected()));
+        vad.setEnabled(!config.vadAuto());
+
+        panel.add(row("Предел длины куска", chunk, "если пауз в речи не случилось"));
+        panel.add(row("Размышления модели", thinking, "на расшифровке они только тратят время"));
+        panel.add(row("Модель", model, "например gemini-3.5-flash"));
+        panel.add(row("Порог тишины", vad, "ниже — в облако не уходит"));
+        panel.add(vadAuto);
+
+        appliers.add(() -> {
+            try {
+                config.setGeminiTuning(
+                        "20 секунд".equals(chunk.getSelectedItem()) ? 20 : 10,
+                        model.getText().trim(),
+                        String.valueOf(thinking.getSelectedItem()));
+                config.setVadTuning(Double.parseDouble(vad.getText().trim()),
+                        vadAuto.isSelected());
+            } catch (NumberFormatException ex) {
+                JOptionPane.showMessageDialog(null, "Порог тишины должен быть числом.");
+                return false;
+            }
+            return true;
+        });
+
+        panel.add(Box.createVerticalStrut(14));
+        JButton reset = new JButton("Сбросить к значениям по умолчанию");
+        reset.setAlignmentX(0);
+        reset.addActionListener(e -> {
+            config.resetTuning();
+            chunk.setSelectedItem(config.chunkSeconds() >= 20 ? "20 секунд" : "10 секунд");
+            thinking.setSelectedItem(config.geminiThinking());
+            model.setText(config.geminiModel());
+            vad.setText(String.valueOf((int) config.vadThreshold()));
+            vadAuto.setSelected(config.vadAuto());
+            vad.setEnabled(!config.vadAuto());
+        });
+        panel.add(reset);
+        panel.add(Box.createVerticalGlue());
+        return panel;
+    }
+
+    private static JPanel yandexTuning(Config config, Runnable onRecognitionChanged,
+                                       List<Applier> appliers) {
+        JPanel panel = new JPanel();
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.setAlignmentX(0);
+
         panel.add(note(
                 "Меньше задержка — короче куски и хуже перевод; больше — наоборот.",
                 "Значения применяются сразу, перезапуск не нужен."));
@@ -291,7 +402,7 @@ public final class SettingsDialog {
     }
 
     /** Строка «подпись — поле — пояснение» одинаковой высоты. */
-    private static JPanel row(String caption, JTextField field, String hint) {
+    private static JPanel row(String caption, JComponent field, String hint) {
         JPanel row = new JPanel();
         row.setLayout(new BoxLayout(row, BoxLayout.X_AXIS));
         row.setAlignmentX(0);
