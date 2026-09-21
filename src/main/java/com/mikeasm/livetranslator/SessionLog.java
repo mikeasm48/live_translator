@@ -81,6 +81,12 @@ public final class SessionLog implements TranscriptView, AutoCloseable {
     }
 
     @Override
+    public synchronized void note(String note) {
+        // Комментарием: читать расшифровку это не мешает, а найти поиском легко.
+        writeRaw("<!-- " + LocalDateTime.now().format(TIME) + " " + note + " -->" + NL);
+    }
+
+    @Override
     public synchronized void status(String message) {
         writeRaw("<!-- " + message + " -->" + NL);
     }

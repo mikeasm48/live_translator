@@ -43,6 +43,9 @@ public final class GeminiSession implements AutoCloseable {
 
         /** Чем сессия занята прямо сейчас. */
         void state(String state);
+
+        /** Что уехало в облако и что вернулось — для расшифровки. */
+        void note(String note);
     }
 
     private final Config config;
@@ -241,8 +244,15 @@ public final class GeminiSession implements AutoCloseable {
         refreshState();
         sender.submit(() -> {
             try {
+                long before = client.tokensUsed();
                 List<GeminiClient.Line> lines =
                         client.translate(wav(pcm, config.sampleRate), true);
+                // Пустой ответ — обычное дело на звуке без слов, и это как раз
+                // то, что стоит видеть в расшифровке: отправляли, но сказать
+                // модели было нечего.
+                listener.note(String.format("отправлено %.1f с звука, токенов %d, реплик %d",
+                        durationMs(pcm.length) / 1000.0, client.tokensUsed() - before,
+                        lines.size()));
                 for (GeminiClient.Line line : lines) {
                     if (line.text().isBlank()) continue;
                     emit(TextCleanup.collapseRepeats(line.original()),
@@ -399,8 +409,10 @@ public final class GeminiSession implements AutoCloseable {
             sender.shutdownNow();
         }
         if (client.tokensUsed() > 0) {
-            System.out.println("Gemini: токенов " + client.tokensUsed()
-                    + ", из них на размышления " + client.thoughtTokens());
+            String total = "всего за сессию: токенов " + client.tokensUsed()
+                    + ", из них на размышления " + client.thoughtTokens();
+            System.out.println("Gemini: " + total);
+            listener.note(total);
         }
     }
 }
