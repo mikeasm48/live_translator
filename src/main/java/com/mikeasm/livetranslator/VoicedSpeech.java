@@ -47,11 +47,12 @@ public final class VoicedSpeech {
      * @param share        доля озвученных среди громких
      * @param medianHz     основной тон, срединное значение по озвученным окнам
      */
-    public record Voice(int voicedFrames, int loudFrames, double share, double medianHz) {}
+    public record Voice(int voicedFrames, int loudFrames, double share, double medianHz,
+                        int voicedMs) {}
 
     public static Voice of(byte[] pcm, int sampleRate) {
         int samples = pcm.length / 2;
-        if (samples < FRAME) return new Voice(0, 0, 0, 0);
+        if (samples < FRAME) return new Voice(0, 0, 0, 0, 0);
 
         int minLag = (int) Math.floor(sampleRate / MAX_HZ);
         int maxLag = (int) Math.ceil(sampleRate / MIN_HZ);
@@ -75,11 +76,12 @@ public final class VoicedSpeech {
             if (hz > 0) pitches.add(hz);
         }
 
-        if (loud == 0) return new Voice(0, 0, 0, 0);
+        int voicedMs = (int) (pitches.size() * (HOP * 1000.0 / sampleRate));
+        if (loud == 0) return new Voice(0, 0, 0, 0, voicedMs);
         double share = pitches.size() / (double) loud;
         java.util.Collections.sort(pitches);
         double median = pitches.isEmpty() ? 0 : pitches.get(pitches.size() / 2);
-        return new Voice(pitches.size(), loud, share, median);
+        return new Voice(pitches.size(), loud, share, median, voicedMs);
     }
 
     /** @return частота основного тона или 0, если окно апериодично */

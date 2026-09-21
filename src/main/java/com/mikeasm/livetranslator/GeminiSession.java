@@ -236,15 +236,27 @@ public final class GeminiSession implements AutoCloseable {
     private static final double MIN_SPEECH_SHARE = 0.25;
 
     /**
-     * Ниже этой доли озвученных окон в облако не отправляем.
+     * Столько голоса должно набраться в куске, чтобы отправить его в облако.
      * <p>
-     * Замерено: у настоящей речи 85–97 %, у записи кашля и стука 0–15 %, у
-     * щелчков по тачпаду и клавиатуре ноль. Порог поставлен посередине этого
-     * разрыва — он широкий, и запас есть с обеих сторон.
+     * Считается именно длительность, а не доля озвученных окон. Доля не
+     * годится: когда рядом с говорящим печатают, стук добавляет громких
+     * неозвученных окон, доля падает вдвое — а голоса в куске ровно столько
+     * же. На этом речь и терялась.
+     * <p>
+     * Замерено по кускам: у чистой речи 1,1–3,4 с голоса, у речи вместе с
+     * клавиатурой 0,8–2,3, у одной клавиатуры 0,03–0,16, у человеческих звуков
+     * без речи 0–0,61.
      */
-    private static final double VOICED_TO_SEND = 0.35;
+    private static final int VOICED_MS_TO_SEND = 700;
 
-    /** А словарь даём только там, где голоса заведомо много. */
+    /**
+     * Либо голоса поменьше, но он занимает больше половины куска: так выглядит
+     * короткая реплика в тишине.
+     */
+    private static final double VOICED_SHARE_TO_SEND = 0.5;
+    private static final int VOICED_MS_WITH_SHARE = 400;
+
+    /** А словарь даём только там, где голоса заведомо много и он не разбавлен. */
     private static final double VOICED_FOR_TERMS = 0.5;
 
     private void send(byte[] pcm, int speechMs) {
@@ -268,10 +280,13 @@ public final class GeminiSession implements AutoCloseable {
                 // настоящей речи озвучено 85–97 % окон, у кашля со стуком 0–15,
                 // у щелчков по тачпаду ноль. Ритм остаётся вторым условием для
                 // словаря: ровное мычание озвучено, но слогов в нём нет.
-                if (voice.share() < VOICED_TO_SEND) {
+                boolean enoughVoice = voice.voicedMs() >= VOICED_MS_TO_SEND
+                        || voice.share() >= VOICED_SHARE_TO_SEND
+                                && voice.voicedMs() >= VOICED_MS_WITH_SHARE;
+                if (!enoughVoice) {
                     listener.note(String.format(
-                            "не отправлено %.1f с: голоса нет (озвучено %.0f%% окон)",
-                            length / 1000.0, voice.share() * 100));
+                            "не отправлено %.1f с: голоса нет (%.2f с голоса, %.0f%% окон)",
+                            length / 1000.0, voice.voicedMs() / 1000.0, voice.share() * 100));
                     return;
                 }
                 boolean terms = voice.share() >= VOICED_FOR_TERMS && shape.speechLike();
@@ -282,9 +297,10 @@ public final class GeminiSession implements AutoCloseable {
                 // то, что стоит видеть в расшифровке: отправляли, но сказать
                 // модели было нечего.
                 listener.note(String.format(
-                        "отправлено %.1f с звука (озвучено %.0f%%, тон %.0f Гц,"
+                        "отправлено %.1f с звука (%.2f с голоса, %.0f%% окон, тон %.0f Гц,"
                                 + " %.1f всплеска в секунду, словарь %s), токенов %d, реплик %d",
-                        durationMs(pcm.length) / 1000.0, voice.share() * 100, voice.medianHz(),
+                        durationMs(pcm.length) / 1000.0, voice.voicedMs() / 1000.0,
+                        voice.share() * 100, voice.medianHz(),
                         shape.perSecond(), terms ? "подан" : "придержан",
                         client.tokensUsed() - before, lines.size()));
                 for (GeminiClient.Line line : lines) {
