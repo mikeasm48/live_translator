@@ -239,20 +239,35 @@ public final class GeminiSession implements AutoCloseable {
         int length = durationMs(pcm.length);
         if (length < MIN_SEND_MS || speechMs < MIN_SPEECH_MS) return;
         if (speechMs < length * MIN_SPEECH_SHARE) return;
+
+        // Громкость говорит, что звук есть. Ритм говорит, речь ли это: человек
+        // произносит слоги, и громкость колеблется несколько раз в секунду,
+        // а кашель, стук и гул так себя не ведут.
+        SpeechShape.Shape shape = SpeechShape.of(pcm, config.sampleRate);
+        if (SpeechShape.definitelyNotSpeech(shape)) {
+            listener.note(String.format(
+                    "не отправлено %.1f с: ритм не речевой (%.1f всплеска в секунду)",
+                    length / 1000.0, shape.perSecond()));
+            return;
+        }
+
         long startedAt = chunkStartedAt;
         inFlight.incrementAndGet();
         refreshState();
         sender.submit(() -> {
             try {
                 long before = client.tokensUsed();
-                List<GeminiClient.Line> lines =
-                        client.translate(wav(pcm, config.sampleRate), true);
+                List<GeminiClient.Line> lines = client.translate(
+                        wav(pcm, config.sampleRate), true, shape.speechLike());
                 // Пустой ответ — обычное дело на звуке без слов, и это как раз
                 // то, что стоит видеть в расшифровке: отправляли, но сказать
                 // модели было нечего.
-                listener.note(String.format("отправлено %.1f с звука, токенов %d, реплик %d",
-                        durationMs(pcm.length) / 1000.0, client.tokensUsed() - before,
-                        lines.size()));
+                listener.note(String.format(
+                        "отправлено %.1f с звука (%.1f всплеска в секунду, словарь %s),"
+                                + " токенов %d, реплик %d",
+                        durationMs(pcm.length) / 1000.0, shape.perSecond(),
+                        shape.speechLike() ? "подан" : "придержан",
+                        client.tokensUsed() - before, lines.size()));
                 for (GeminiClient.Line line : lines) {
                     if (line.text().isBlank()) continue;
                     emit(TextCleanup.collapseRepeats(line.original()),
