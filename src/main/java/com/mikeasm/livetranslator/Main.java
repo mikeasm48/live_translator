@@ -106,6 +106,10 @@ public final class Main {
         views.add(new ConsoleView());
         if (config.showUi) views.add(OverlayWindow.create(config, controlFor(capture, gate, sessionRef)));
         SessionLog log = new SessionLog(AppPaths.logsDir());
+        // Первой строкой — чем и как этот лог записан. Без этого по нему не
+        // понять, какую сборку чинить: настройки за неделю меняются несколько
+        // раз, а лог живёт дольше.
+        log.note(describe(config));
         views.add(log);
         TranscriptView view = fanOut(views);
 
@@ -404,6 +408,19 @@ public final class Main {
                 + " Расшифровка пишется в " + log.path() + ". Выход — Ctrl+C.");
         System.out.println();
         shutdown.await();
+    }
+
+    /** Чем и как записан лог: версия, движок, существенные настройки. */
+    private static String describe(Config config) {
+        if (config.usesGemini()) {
+            return "Live Translator " + VERSION + ", движок Gemini " + config.geminiModel()
+                    + ", куски до " + config.chunkSeconds() + " с"
+                    + ", размышления " + config.geminiThinking()
+                    + ", перевод на " + config.targetLang;
+        }
+        return "Live Translator " + VERSION + ", движок Yandex SpeechKit"
+                + ", языки " + config.langsLabel() + " → " + config.targetLang
+                + ", склейка " + config.mergeWords() + " слов";
     }
 
     /**
