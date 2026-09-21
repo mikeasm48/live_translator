@@ -332,6 +332,11 @@ public final class Main {
                     public void state(String state) {
                         view.state(state);
                     }
+
+                    @Override
+                    public void note(String note) {
+                        view.note(note);
+                    }
                 });
 
         sessionRef.set(new Listening() {
@@ -787,6 +792,11 @@ public final class Main {
             @Override
             public void state(String state) {
                 views.forEach(v -> safely(() -> v.state(state)));
+            }
+
+            @Override
+            public void note(String note) {
+                views.forEach(v -> safely(() -> v.note(note)));
             }
 
             private void safely(Runnable action) {
