@@ -138,17 +138,32 @@ public final class GeminiClient {
      *                     нужны в расшифровке встречи и под переводом в окне
      */
     public List<Line> translate(byte[] wav, boolean withOriginal) throws IOException {
+        return translate(wav, withOriginal, true);
+    }
+
+    /**
+     * @param withTerms перечислять ли ожидаемые термины именно в этом запросе
+     *                  <p>
+     *                  Замерено: на записи без речи словарь — не приправа, а
+     *                  условие выдумки. С ним модель сочинила три реплики про
+     *                  commit, GitHub и merge, без него не сказала ничего. На
+     *                  настоящей речи словарь, наоборот, нужен: «sout» узнан
+     *                  четыре раза против нуля. Поэтому он подаётся не всегда,
+     *                  а когда кусок похож на речь.
+     */
+    public List<Line> translate(byte[] wav, boolean withOriginal, boolean withTerms)
+            throws IOException {
         return ask(wav, task(TRANSLATE.formatted(languageName(config.targetLang), RULES),
-                withOriginal));
+                withOriginal, withTerms));
     }
 
     /** Расшифровывает кусок дословно, без перевода. */
     public List<Line> transcribe(byte[] wav) throws IOException {
-        return ask(wav, task(TRANSCRIBE.formatted(RULES), false));
+        return ask(wav, task(TRANSCRIBE.formatted(RULES), false, true));
     }
 
     /** Задание модели: правила плюс список слов, которые стоит ожидать. */
-    private String task(String instruction, boolean withOriginal) {
+    private String task(String instruction, boolean withOriginal, boolean termsNow) {
         StringBuilder text = new StringBuilder(instruction);
         if (!withOriginal) {
             // Строка с оригиналом просится в самой инструкции перевода; когда
@@ -156,7 +171,7 @@ public final class GeminiClient {
             int at = text.indexOf("\n> то же самое на языке оригинала");
             if (at >= 0) text.delete(at, at + "\n> то же самое на языке оригинала".length());
         }
-        List<String> terms = withTerms ? expectedTerms() : List.of();
+        List<String> terms = withTerms && termsNow ? expectedTerms() : List.of();
         if (!terms.isEmpty()) {
             text.append("\nЕсли встретятся эти названия, пиши их именно так ")
                     .append("(перечисление — не обещание, что они прозвучат):\n");
