@@ -136,6 +136,7 @@ public final class OverlayWindow implements TranscriptView {
     private final JComboBox<String> deviceBox = new JComboBox<>();
     private final JLabel statusLabel = new JLabel(" ");
     private final LevelBar levelBar = new LevelBar();
+    private final JButton settingsButton = new JButton("⚙");
     private final JPanel statusLine = new JPanel();
     /** Что происходит прямо сейчас. В отличие от сообщений, не гаснет. */
     private final JLabel stateLabel = new JLabel();
@@ -156,7 +157,7 @@ public final class OverlayWindow implements TranscriptView {
         this.control = control;
         this.config = config;
         showSource.setSelected(config.showSource);
-        frame = new JFrame("Live Translator — " + config.langsLabel() + " → " + config.targetLang);
+        frame = new JFrame(title(config));
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         frame.setAlwaysOnTop(true);
         frame.setSize(780, 470);
@@ -169,8 +170,12 @@ public final class OverlayWindow implements TranscriptView {
         root.add(buildPartial(config), BorderLayout.SOUTH);
         root.setPreferredSize(new Dimension(780, 470));
 
-        frame.setJMenuBar(buildMenu());
         frame.setContentPane(root);
+        // Привычное Cmd + , вместо строки меню: настройки ищут именно так.
+        root.registerKeyboardAction(e -> openSettings(),
+                javax.swing.KeyStroke.getKeyStroke(',',
+                        java.awt.Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx()),
+                JPanel.WHEN_IN_FOCUSED_WINDOW);
         frame.setVisible(true);
 
         if (control != null) new Timer(250, e -> tick()).start();
@@ -207,25 +212,24 @@ public final class OverlayWindow implements TranscriptView {
         return statusLine;
     }
 
-    /** Меню нужно ради стандартного Cmd + , — настройки ищут именно там. */
-    private javax.swing.JMenuBar buildMenu() {
-        javax.swing.JMenuBar menuBar = new javax.swing.JMenuBar();
-        javax.swing.JMenu menu = new javax.swing.JMenu("Live Translator");
-        javax.swing.JMenuItem settings = new javax.swing.JMenuItem("Настройки…");
-        settings.setAccelerator(javax.swing.KeyStroke.getKeyStroke(',',
-                java.awt.Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx()));
-        settings.addActionListener(e -> openSettings());
-        menu.add(settings);
-        menuBar.add(menu);
-        return menuBar;
+    /**
+     * Заголовок окна.
+     * <p>
+     * Список исходных языков — настройка Яндекса: там он работает белым
+     * списком распознавания. Gemini определяет язык сам, и показывать ему
+     * перечень значило бы обещать управление, которого нет.
+     */
+    private static String title(Config config) {
+        return config.usesGemini()
+                ? "Live Translator — перевод на " + config.targetLang
+                : "Live Translator — " + config.langsLabel() + " → " + config.targetLang;
     }
 
     private void openSettings() {
         SettingsDialog.show(frame, config, () -> {
             if (control != null) control.languagesChanged();
-            frame.setTitle("Live Translator — " + config.langsLabel()
-                    + " → " + config.targetLang);
-            setStatus("языки: " + config.langsLabel());
+            frame.setTitle(title(config));
+            if (!config.usesGemini()) setStatus("языки: " + config.langsLabel());
         });
     }
 
@@ -286,6 +290,13 @@ public final class OverlayWindow implements TranscriptView {
         bar.add(Box.createHorizontalStrut(12));
         bar.add(showSource);
         bar.add(Box.createHorizontalGlue());
+        // Кнопка вместо строки меню: та занимала целую полосу окна и повторяла
+        // имя приложения, уже написанное в заголовке. Привычное Cmd + ,
+        // при этом остаётся — оно повешено на само окно.
+        styleButton(settingsButton, small);
+        settingsButton.setToolTipText("Настройки (Cmd + ,)");
+        settingsButton.addActionListener(e -> openSettings());
+        bar.add(settingsButton);
         return bar;
     }
 
