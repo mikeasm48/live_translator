@@ -213,16 +213,19 @@ public final class OverlayWindow implements TranscriptView {
     }
 
     /**
-     * Заголовок окна.
+     * Заголовок окна: версия и то, что относится к выбранному движку.
      * <p>
      * Список исходных языков — настройка Яндекса: там он работает белым
      * списком распознавания. Gemini определяет язык сам, и показывать ему
      * перечень значило бы обещать управление, которого нет.
      */
     private static String title(Config config) {
+        // Версия в заголовке — чтобы на снимке экрана было видно, какая сборка
+        // работает. Присланный без неё снимок стоит лишнего круга вопросов.
+        String name = "Live Translator " + Main.VERSION;
         return config.usesGemini()
-                ? "Live Translator — перевод на " + config.targetLang
-                : "Live Translator — " + config.langsLabel() + " → " + config.targetLang;
+                ? name + " — перевод на " + config.targetLang
+                : name + " — " + config.langsLabel() + " → " + config.targetLang;
     }
 
     private void openSettings() {
