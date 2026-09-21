@@ -235,38 +235,57 @@ public final class GeminiSession implements AutoCloseable {
      */
     private static final double MIN_SPEECH_SHARE = 0.25;
 
+    /**
+     * Ниже этой доли озвученных окон в облако не отправляем.
+     * <p>
+     * Замерено: у настоящей речи 85–97 %, у записи кашля и стука 0–15 %, у
+     * щелчков по тачпаду и клавиатуре ноль. Порог поставлен посередине этого
+     * разрыва — он широкий, и запас есть с обеих сторон.
+     */
+    private static final double VOICED_TO_SEND = 0.35;
+
+    /** А словарь даём только там, где голоса заведомо много. */
+    private static final double VOICED_FOR_TERMS = 0.5;
+
     private void send(byte[] pcm, int speechMs) {
         int length = durationMs(pcm.length);
         if (length < MIN_SEND_MS || speechMs < MIN_SPEECH_MS) return;
         if (speechMs < length * MIN_SPEECH_SHARE) return;
-
-        // Громкость говорит, что звук есть. Ритм говорит, речь ли это: человек
-        // произносит слоги, и громкость колеблется несколько раз в секунду,
-        // а кашель, стук и гул так себя не ведут.
-        SpeechShape.Shape shape = SpeechShape.of(pcm, config.sampleRate);
-        if (SpeechShape.definitelyNotSpeech(shape)) {
-            listener.note(String.format(
-                    "не отправлено %.1f с: ритм не речевой (%.1f всплеска в секунду)",
-                    length / 1000.0, shape.perSecond()));
-            return;
-        }
 
         long startedAt = chunkStartedAt;
         inFlight.incrementAndGet();
         refreshState();
         sender.submit(() -> {
             try {
+                // Разбор звука делается здесь, а не в потоке захвата: поиск
+                // основного тона стоит десятки миллисекунд, и задерживать на
+                // них приём звука с устройства нельзя.
+                VoicedSpeech.Voice voice = VoicedSpeech.of(pcm, config.sampleRate);
+                SpeechShape.Shape shape = SpeechShape.of(pcm, config.sampleRate);
+
+                // Голос — то, что у речи есть всегда, а у щелчков не бывает
+                // никогда: связки дают периодичность 70–350 Гц. Замерено: у
+                // настоящей речи озвучено 85–97 % окон, у кашля со стуком 0–15,
+                // у щелчков по тачпаду ноль. Ритм остаётся вторым условием для
+                // словаря: ровное мычание озвучено, но слогов в нём нет.
+                if (voice.share() < VOICED_TO_SEND) {
+                    listener.note(String.format(
+                            "не отправлено %.1f с: голоса нет (озвучено %.0f%% окон)",
+                            length / 1000.0, voice.share() * 100));
+                    return;
+                }
+                boolean terms = voice.share() >= VOICED_FOR_TERMS && shape.speechLike();
                 long before = client.tokensUsed();
                 List<GeminiClient.Line> lines = client.translate(
-                        wav(pcm, config.sampleRate), true, shape.speechLike());
+                        wav(pcm, config.sampleRate), true, terms);
                 // Пустой ответ — обычное дело на звуке без слов, и это как раз
                 // то, что стоит видеть в расшифровке: отправляли, но сказать
                 // модели было нечего.
                 listener.note(String.format(
-                        "отправлено %.1f с звука (%.1f всплеска в секунду, словарь %s),"
-                                + " токенов %d, реплик %d",
-                        durationMs(pcm.length) / 1000.0, shape.perSecond(),
-                        shape.speechLike() ? "подан" : "придержан",
+                        "отправлено %.1f с звука (озвучено %.0f%%, тон %.0f Гц,"
+                                + " %.1f всплеска в секунду, словарь %s), токенов %d, реплик %d",
+                        durationMs(pcm.length) / 1000.0, voice.share() * 100, voice.medianHz(),
+                        shape.perSecond(), terms ? "подан" : "придержан",
                         client.tokensUsed() - before, lines.size()));
                 for (GeminiClient.Line line : lines) {
                     if (line.text().isBlank()) continue;
