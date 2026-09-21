@@ -73,6 +73,14 @@ public final class Config {
      * перестаёт быть узким местом.
      */
     public static final int DEFAULT_AUDIO_BITRATE = 32000;
+    /**
+     * Сколько звук должен длиться, чтобы считаться речью, мс.
+     * <p>
+     * Кашель, стук двери, щелчок клавиши укладываются в две-три десятых
+     * секунды. Речь так не начинается. В шумном помещении значение можно
+     * поднять, но слишком большое начнёт съедать короткие ответы.
+     */
+    public static final int DEFAULT_SPEECH_ONSET_MS = 400;
 
     /** Имена настроек, которые правятся в окне и сбрасываются одной кнопкой. */
     private static final String[] TUNING_KEYS = {
@@ -287,6 +295,15 @@ public final class Config {
     /** Сжимать ли звук перед отправкой. Выключается, если кодировщик подводит. */
     public boolean compressAudio() {
         return Boolean.parseBoolean(settingOr("LT_COMPRESS_AUDIO", "true"));
+    }
+
+    public int speechOnsetMs() {
+        try {
+            return Integer.parseInt(settingOr("LT_SPEECH_ONSET_MS",
+                    String.valueOf(DEFAULT_SPEECH_ONSET_MS)));
+        } catch (NumberFormatException e) {
+            return DEFAULT_SPEECH_ONSET_MS;
+        }
     }
 
     public int audioBitrate() {

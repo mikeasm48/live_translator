@@ -12,8 +12,22 @@ public final class SilenceGate {
 
     /** Сколько подряд тихих фрагментов нужно, чтобы признать паузу (мс / CHUNK_MS). */
     private static final int HANGOVER_CHUNKS = 8;
-    /** Глубина буфера предзаписи. */
+    /** Глубина буфера предзаписи до начала речи. */
     private static final int PREROLL_CHUNKS = 3;
+
+    /**
+     * Сколько звук должен длиться, чтобы считаться речью, а не помехой.
+     * <p>
+     * Кашель, стук двери, щелчок клавиши — всё это громче порога, но коротко:
+     * две-три десятых секунды. Речь так не начинается. Раньше гейт открывался
+     * на первом же громком фрагменте, и кашель уезжал в модель, а модель,
+     * получив звук без слов, принималась сочинять.
+     * <p>
+     * Потерянного начала фразы бояться не нужно: всё это время звук копится в
+     * буфере предзаписи и уходит целиком, как только речь признана.
+     * <p>
+     * Значение берётся из настроек: в шумном помещении его можно поднять.
+     */
 
     /** Ниже этого уровня речи не бывает ни на одном источнике. */
     private static final double FLOOR_MINIMUM = 25;
@@ -24,13 +38,22 @@ public final class SilenceGate {
     /** Оценка собственного шума источника: быстро вниз, очень медленно вверх. */
     private volatile double noiseFloor = FLOOR_MINIMUM;
     private volatile double effectiveThreshold = FLOOR_MINIMUM * SPEECH_OVER_NOISE;
-    private final byte[][] preroll = new byte[PREROLL_CHUNKS][];
+    /**
+     * Буфер хранит и тишину до речи, и саму проверяемую вспышку: когда речь
+     * наконец признана, отдать надо всё с самого начала.
+     */
+    private final byte[][] preroll;
+    private final int onsetChunks;
     private int prerollSize;
     private int quietStreak;
+    /** Сколько громких фрагментов подряд набралось до признания речи. */
+    private int loudStreak;
     private boolean speaking;
 
     public SilenceGate(Config config) {
         this.config = config;
+        this.onsetChunks = Math.max(1, config.speechOnsetMs() / AudioCapture.CHUNK_MS);
+        this.preroll = new byte[PREROLL_CHUNKS + onsetChunks][];
     }
 
     /** Результат обработки фрагмента. */
@@ -47,16 +70,25 @@ public final class SilenceGate {
         boolean loud = level >= threshold(level);
         if (loud) {
             quietStreak = 0;
-            if (!speaking) {
-                speaking = true;
-                byte[][] out = new byte[prerollSize + 1][];
-                System.arraycopy(preroll, 0, out, 0, prerollSize);
-                out[prerollSize] = chunk;
-                prerollSize = 0;
-                return new Speech(out);
-            }
-            return new Speech(new byte[][]{chunk});
+            if (speaking) return new Speech(new byte[][]{chunk});
+
+            // Речь ещё не признана: копим вспышку и ждём, продлится ли она.
+            loudStreak++;
+            pushPreroll(chunk);
+            if (loudStreak < onsetChunks) return new Silence(AudioCapture.CHUNK_MS);
+
+            speaking = true;
+            loudStreak = 0;
+            byte[][] out = new byte[prerollSize][];
+            System.arraycopy(preroll, 0, out, 0, prerollSize);
+            prerollSize = 0;
+            return new Speech(out);
         }
+
+        // Тихий фрагмент до начала речи не обнуляет вспышку разом, а убавляет
+        // её: в начале слова бывает провал, и ронять из-за него всю фразу
+        // обиднее, чем пропустить лишний щелчок.
+        if (!speaking && loudStreak > 0) loudStreak--;
 
         if (speaking) {
             quietStreak++;
@@ -73,8 +105,8 @@ public final class SilenceGate {
     }
 
     private void pushPreroll(byte[] chunk) {
-        if (prerollSize == PREROLL_CHUNKS) {
-            System.arraycopy(preroll, 1, preroll, 0, PREROLL_CHUNKS - 1);
+        if (prerollSize == preroll.length) {
+            System.arraycopy(preroll, 1, preroll, 0, preroll.length - 1);
             prerollSize--;
         }
         preroll[prerollSize++] = chunk;

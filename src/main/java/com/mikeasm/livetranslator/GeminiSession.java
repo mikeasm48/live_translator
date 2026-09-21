@@ -149,10 +149,17 @@ public final class GeminiSession implements AutoCloseable {
                     // Берём именно то, что отдал детектор: вместе с фрагментом
                     // приходит предзапись — доли секунды до первого звука, без
                     // которых у фразы срезается начало.
-                    for (byte[] part : speech.chunks()) buffer.write(part, 0, part.length);
+                    // Считаем по тому, что действительно отправляем: в начале
+                    // фразы детектор отдаёт разом весь накопленный буфер, и
+                    // мерить его длиной входящего фрагмента было бы неверно.
+                    int written = 0;
+                    for (byte[] part : speech.chunks()) {
+                        buffer.write(part, 0, part.length);
+                        written += part.length;
+                    }
                     speaking = true;
                     heardSpeech = true;
-                    speechMs += durationMs(chunk.length);
+                    speechMs += durationMs(written);
                     silenceRunMs = 0;
                 }
                 case SilenceGate.Silence silence -> {
