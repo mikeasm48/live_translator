@@ -111,7 +111,29 @@
                     <exclude>META-INF/*.SF</exclude>
                     <exclude>META-INF/*.DSA</exclude>
                     <exclude>META-INF/*.RSA</exclude>
+                    <!-- Приложение живёт только на macOS, а netty везёт с собой
+                         библиотеки шифрования для всех систем сразу. -->
+                    <exclude>META-INF/native/*windows*</exclude>
+                    <exclude>META-INF/native/*linux*</exclude>
                   </excludes>
+                </filter>
+                <!-- java-genproto — это весь Yandex Cloud: триста мегабайт
+                     классов для двух сотен сервисов, из которых нам нужны три.
+                     Всё это уезжало в релиз и становилось стодвадцатимегабайтным
+                     обновлением, которое на офисной сети качается минутами и
+                     выглядит зависшим. Берём только нужные деревья. -->
+                <filter>
+                  <artifact>com.yandex.cloud:java-genproto</artifact>
+                  <includes>
+                    <include>yandex/cloud/api/ai/stt/v3/**</include>
+                    <include>yandex/cloud/api/ai/translate/v2/**</include>
+                    <include>yandex/cloud/api/ai/foundation_models/**</include>
+                    <include>yandex/cloud/api/operation/**</include>
+                    <include>yandex/cloud/api/access/**</include>
+                    <include>yandex/cloud/api/validation/**</include>
+                    <include>yandex/cloud/api/*.class</include>
+                    <include>yandex/cloud/*.class</include>
+                  </includes>
                 </filter>
               </filters>
             </configuration>
