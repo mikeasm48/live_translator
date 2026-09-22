@@ -187,6 +187,10 @@ public final class Diagnostics {
      * вложения. Спрашивать саму «Почту» тоже нельзя: вопрос её запустит.
      * Поэтому смотрим, кому система отдаёт ссылки mailto.
      */
+    static boolean usesMail() {
+        return appleMailHandlesLetters();
+    }
+
     private static boolean appleMailHandlesLetters() {
         Shell.Result handlers = Shell.run(15, "/usr/bin/defaults", "read",
                 "com.apple.LaunchServices/com.apple.launchservices.secure", "LSHandlers");
