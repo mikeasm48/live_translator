@@ -556,6 +556,9 @@ public final class Main {
      * Письмо только открывается: отправить его — решение человека, в журналах
      * лежат тексты его встреч.
      */
+    /** Признак того, что про запрос разрешения человеку уже рассказали. */
+    private static final String MAIL_HINT = "LT_MAIL_HINT";
+
     static void sendDiagnostics(java.awt.Component owner, String reason) {
         java.util.concurrent.atomic.AtomicReference<java.nio.file.Path> file =
                 new java.util.concurrent.atomic.AtomicReference<>();
@@ -571,6 +574,18 @@ public final class Main {
         if (!trouble.isBlank()) {
             tell(owner, trouble);
             return;
+        }
+
+        // Про запрос разрешения предупреждаем заранее и один раз. Система
+        // задаёт его от имени того, кто шлёт команду, и имя это человеку
+        // незнакомо; не поняв, чего от него хотят, он нажмёт «Не разрешать»,
+        // и письмо придёт без вложения — то есть впустую.
+        if (Diagnostics.usesMail() && Settings.get(MAIL_HINT).isBlank()) {
+            tell(owner, "Сейчас откроется «Почта» с письмом.\n\n"
+                    + "Если система спросит разрешение управлять «Почтой» — разрешите:\n"
+                    + "без него файл в письмо не вложится. Запрос может прийти\n"
+                    + "от имени «java» — это и есть Live Translator.");
+            Settings.save(MAIL_HINT, "показано");
         }
 
         // Дальше на экран выходят чужие окна: разрешение на управление
