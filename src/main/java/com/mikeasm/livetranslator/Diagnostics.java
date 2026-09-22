@@ -53,6 +53,8 @@ public final class Diagnostics {
     private static OutputStream consoleSink;
     private static long consoleWritten;
     private static Path consoleFile;
+    /** Разбор команды терминалу: 0 — обычный текст, 1 — после ESC, 2 — внутри команды. */
+    private static int escape;
 
     private Diagnostics() {}
 
@@ -129,16 +131,19 @@ public final class Diagnostics {
         String summary = summary(reason);
 
         step.accept("Собираю журналы…");
-        Path zip = desktop().resolve("live-translator-диагностика-"
+        // Имена внутри архива и у него самого — латиницей. Кириллические
+        // читает Finder, но консольный unzip на них спотыкается («illegal byte
+        // sequence»), а разбирать архив будут как раз в консоли.
+        Path zip = desktop().resolve("live-translator-diagnostics-"
                 + LocalDateTime.now().format(FILE_STAMP) + ".zip");
         try (ZipOutputStream out = new ZipOutputStream(Files.newOutputStream(zip),
                 StandardCharsets.UTF_8)) {
-            write(out, "сведения.txt", summary.getBytes(StandardCharsets.UTF_8));
+            write(out, "summary.txt", summary.getBytes(StandardCharsets.UTF_8));
             copy(out, updateLog(), "update.log");
             Path dir = AppPaths.supportLogsDir();
             copy(out, dir.resolve("console.log"), "console.log");
-            copy(out, dir.resolve("console-1.log"), "console-1.log");
-            write(out, "настройки.txt", settings().getBytes(StandardCharsets.UTF_8));
+            copy(out, dir.resolve("console-1.log"), "console-previous.log");
+            write(out, "settings.txt", settings().getBytes(StandardCharsets.UTF_8));
         }
         return zip;
     }
@@ -150,37 +155,53 @@ public final class Diagnostics {
      */
     public static String openLetter(Path zip) {
         String subject = "Live Translator " + Main.VERSION + ": диагностика";
-        String body = "Здравствуйте! Прикладываю файл с журналами: "
-                + zip.getFileName() + "\n\nЧто происходило:\n\n";
 
-        if (mailConfigured() && attachViaMail(zip, subject, body)) {
+        if (appleMailHandlesLetters()
+                && attachViaMail(zip, subject, "Здравствуйте! Во вложении журналы Live Translator "
+                        + Main.VERSION + ".\n")) {
             return "Письмо открыто в «Почте», файл уже вложен.\n"
-                    + "Допишите, что происходило, и нажмите «Отправить».";
+                    + "Осталось нажать «Отправить».";
         }
 
+        // Без «Почты» вложить файл нечем: ссылка mailto вложений не передаёт.
+        // Тогда письмо и файл показываются рядом, и остаётся перетащить.
         Shell.run(10, "/usr/bin/open", "-R", zip.toString());
-        Shell.run(10, "/usr/bin/open", mailto(subject, body));
+        Shell.run(10, "/usr/bin/open", mailto(subject,
+                "Здравствуйте! Журналы Live Translator " + Main.VERSION + " — в файле "
+                        + zip.getFileName() + " с рабочего стола.\n"));
         return "Файл лежит на рабочем столе: " + zip.getFileName() + "\n\n"
                 + "Открылись письмо и папка с файлом — перетащите файл в письмо\n"
                 + "и нажмите «Отправить». Адрес уже подставлен.";
     }
 
     /**
-     * Есть ли настроенная «Почта».
+     * Отдаёт ли система письма «Почте».
      * <p>
-     * Спрашивать об этом саму «Почту» нельзя: вопрос её запустит, а если ею не
-     * пользуются, человек получит пустое непонятное окно. Каталог с ящиками
-     * появляется только после настройки, и это видно, ничего не запуская.
+     * Вложить файл прямо в письмо умеет только она: у неё есть словарь
+     * AppleScript, в котором это выражается, а ссылка {@code mailto} вложений
+     * не передаёт вовсе.
+     * <p>
+     * Судить о «Почте» по каталогу {@code ~/Library/Mail} нельзя: macOS
+     * закрывает его без «Полного доступа к диску», и приложение видит пустоту
+     * вместо настроенных ящиков — именно на этом письмо однажды ушло без
+     * вложения. Спрашивать саму «Почту» тоже нельзя: вопрос её запустит.
+     * Поэтому смотрим, кому система отдаёт ссылки mailto.
      */
-    private static boolean mailConfigured() {
-        Path mail = Path.of(System.getProperty("user.home"), "Library", "Mail");
-        if (!Files.isDirectory(mail)) return false;
-        try (var entries = Files.list(mail)) {
-            return entries.anyMatch(p -> p.getFileName().toString().startsWith("V"));
-        } catch (IOException e) {
-            return false;
-        }
+    private static boolean appleMailHandlesLetters() {
+        Shell.Result handlers = Shell.run(15, "/usr/bin/defaults", "read",
+                "com.apple.LaunchServices/com.apple.launchservices.secure", "LSHandlers");
+        // Переопределений нет вовсе — письма открывает «Почта».
+        if (!handlers.ok() || !handlers.output().contains("mailto")) return true;
+
+        java.util.regex.Matcher handler = MAILTO_HANDLER.matcher(handlers.output());
+        if (!handler.find()) return false;
+        return handler.group(1).equalsIgnoreCase("com.apple.mail");
     }
+
+    private static final java.util.regex.Pattern MAILTO_HANDLER =
+            java.util.regex.Pattern.compile(
+                    "LSHandlerRoleAll\\s*=\\s*\"?([^\";]+)\"?;[^{}]*"
+                            + "LSHandlerURLScheme\\s*=\\s*mailto;");
 
     private static boolean attachViaMail(Path zip, String subject, String body) {
         String script = """
@@ -358,8 +379,7 @@ public final class Diagnostics {
                 console.write(bytes, from, length);
                 synchronized (LOCK) {
                     if (consoleSink == null || consoleWritten > CONSOLE_LIMIT) return;
-                    consoleSink.write(bytes, from, length);
-                    consoleWritten += length;
+                    toFile(bytes, from, length);
                 }
             }
 
@@ -371,5 +391,39 @@ public final class Diagnostics {
                 }
             }
         }, true, StandardCharsets.UTF_8);
+    }
+
+    /**
+     * Пишет в файл всё, кроме команд терминалу.
+     * <p>
+     * Строка с текущей фразой перерисовывается поверх себя, и для этого в поток
+     * уходит «стереть строку». На экране это невидимо, а в файле остаётся
+     * мусором вроде {@code [2K} посреди текста.
+     */
+    private static void toFile(byte[] bytes, int from, int length) throws IOException {
+        int plainFrom = from;
+        for (int i = from; i < from + length; i++) {
+            int b = bytes[i] & 0xFF;
+            if (escape == 0) {
+                if (b == 0x1B) {
+                    save(bytes, plainFrom, i - plainFrom);
+                    escape = 1;
+                }
+            } else if (escape == 1) {
+                // За ESC либо «[» и дальше команда, либо одиночный знак.
+                escape = b == '[' ? 2 : 0;
+                if (escape == 0) plainFrom = i + 1;
+            } else if (b >= 0x40 && b <= 0x7E) {
+                escape = 0;
+                plainFrom = i + 1;
+            }
+        }
+        if (escape == 0) save(bytes, plainFrom, from + length - plainFrom);
+    }
+
+    private static void save(byte[] bytes, int from, int length) throws IOException {
+        if (length <= 0) return;
+        consoleSink.write(bytes, from, length);
+        consoleWritten += length;
     }
 }
