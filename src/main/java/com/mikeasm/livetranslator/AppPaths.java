@@ -75,6 +75,19 @@ public final class AppPaths {
         return Path.of(System.getProperty("user.home"), ".config", APP);
     }
 
+    /**
+     * Служебные журналы: вывод консоли и ход обновления.
+     * <p>
+     * Это не расшифровки встреч, и место у них другое — стандартное для macOS
+     * {@code ~/Library/Logs}. Туда же смотрит «Консоль», и человеку, который не
+     * ходит в терминал, файл всё равно достанет приложение.
+     */
+    public static Path supportLogsDir() {
+        return DEVELOPMENT
+                ? Path.of("logs")
+                : Path.of(System.getProperty("user.home"), "Library", "Logs", "LiveTranslator");
+    }
+
     private static void seedGlossary(Path target) {
         try (InputStream bundled = AppPaths.class.getResourceAsStream("/glossary.txt")) {
             if (bundled == null) return;
