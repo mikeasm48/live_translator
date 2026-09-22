@@ -145,6 +145,8 @@ public final class OverlayWindow implements TranscriptView {
     private final JScrollPane scroll = new JScrollPane();
     private final JFrame frame;
     private final Control control;
+    /** Открытая панель — она в приложении одна. */
+    private static volatile OverlayWindow shown;
 
     /** Создаёт окно в потоке диспетчеризации событий, как требует Swing. */
     public static OverlayWindow create(Config config, Control control) throws Exception {
@@ -153,7 +155,19 @@ public final class OverlayWindow implements TranscriptView {
         return holder.get();
     }
 
+    /**
+     * Панель держится поверх всех окон, и это мешает ровно в одном случае:
+     * когда на экран выходит чужое окно, которого человек ждёт, — системное
+     * разрешение или письмо с диагностикой. На это время панель уступает.
+     */
+    public static void yieldTop(boolean yield) {
+        OverlayWindow window = shown;
+        if (window == null) return;
+        SwingUtilities.invokeLater(() -> window.frame.setAlwaysOnTop(!yield));
+    }
+
     private OverlayWindow(Config config, Control control) {
+        shown = this;
         this.control = control;
         this.config = config;
         showSource.setSelected(config.showSource);

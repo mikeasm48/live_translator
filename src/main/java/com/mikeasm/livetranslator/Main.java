@@ -20,6 +20,10 @@ public final class Main {
     static final String VERSION = "0.4.10";
 
     public static void main(String[] args) throws Exception {
+        // Первым делом: запущенное из «Программ» приложение пишет в никуда, а
+        // именно эти строки и нужны, когда разбираешься, почему на чужой
+        // машине что-то не сработало.
+        Diagnostics.captureConsole();
         Config parsed = Config.parse(args);
         AppBundle.ensureInstalled(VERSION);
 
@@ -105,6 +109,10 @@ public final class Main {
         List<TranscriptView> views = new ArrayList<>();
         views.add(new ConsoleView());
         if (config.showUi) views.add(OverlayWindow.create(config, controlFor(capture, gate, sessionRef)));
+        // То же самое — в консоль, а значит и в журнал консоли: разбираться
+        // потом придётся по нему.
+        System.out.println(describe(config));
+
         SessionLog log = new SessionLog(AppPaths.logsDir());
         // Первой строкой — чем и как этот лог записан. Без этого по нему не
         // понять, какую сборку чинить: настройки за неделю меняются несколько
@@ -433,8 +441,7 @@ public final class Main {
     private static void offerUpdate(boolean graphical) {
         // Проверка не должна задерживать запуск: на сломанном сервере имён
         // обращение к сети может подвиснуть дольше собственного таймаута.
-        java.util.concurrent.atomic.AtomicReference<Updates.Available> found =
-                new java.util.concurrent.atomic.AtomicReference<>();
+        AtomicReference<Updates.Available> found = new AtomicReference<>();
         Thread probe = new Thread(() -> Updates.check(VERSION).ifPresent(found::set), "updates");
         probe.setDaemon(true);
         probe.start();
@@ -452,8 +459,15 @@ public final class Main {
                     + ". Обновить: brew upgrade live-translator");
             return;
         }
+        // Про пропущенную версию человек уже ответил, и ответ был «больше не
+        // спрашивай». Предложение остаётся в настройках — там его ищут сами.
+        if (Updates.skipped(update.version())) {
+            System.out.println("Версия " + update.version()
+                    + " пропущена: поставить её можно в настройках.");
+            return;
+        }
 
-        proposeInstall(null, update);
+        proposeInstall(null, update, true);
     }
 
     /**
@@ -464,16 +478,17 @@ public final class Main {
      */
     static void checkForUpdates(java.awt.Component owner, Runnable done) {
         Thread probe = new Thread(() -> {
-            java.util.Optional<Updates.Available> found = Updates.check(VERSION);
+            // Здесь проверяем даже при выключенной проверке при запуске и даже
+            // пропущенную версию: человек пришёл в настройки и спросил сам.
+            java.util.Optional<Updates.Available> found = Updates.checkNow(VERSION);
             javax.swing.SwingUtilities.invokeLater(() -> {
                 // Кнопку возвращаем в исходное до показа ответа: иначе человек
                 // читает «У вас последняя версия», а рядом всё ещё «Проверяю…».
                 done.run();
                 if (found.isPresent()) {
-                    proposeInstall(owner, found.get());
+                    proposeInstall(owner, found.get(), false);
                 } else {
-                    javax.swing.JOptionPane.showMessageDialog(owner,
-                            "У вас последняя версия: " + VERSION + ".");
+                    tell(owner, "У вас последняя версия: " + VERSION + ".");
                 }
             });
         }, "updates-manual");
@@ -481,20 +496,39 @@ public final class Main {
         probe.start();
     }
 
-    /** Спрашивает и ставит. Вызывается в потоке отрисовки. */
-    private static void proposeInstall(java.awt.Component owner, Updates.Available update) {
-        int answer = ask(owner, "Доступна версия " + update.version() + ", у вас "
-                + VERSION + ".\nОбновить сейчас? Приложение закроется и откроется заново.",
-                "Обновление", new String[]{"Обновить", "Позже"});
+    /**
+     * Спрашивает и ставит.
+     * <p>
+     * Три ответа вместо двух. Обновление всегда не вовремя: до встречи минута,
+     * а программа предлагает подождать. «Не сейчас» спросит при следующем
+     * запуске, «пропустить» закроет вопрос до следующего выпуска — но только
+     * при запуске, из настроек версию по-прежнему видно и поставить можно.
+     */
+    private static void proposeInstall(java.awt.Component owner, Updates.Available update,
+                                       boolean atStartup) {
+        String question = "Доступна версия " + update.version() + ", у вас " + VERSION + "."
+                + "\nОбновить сейчас? Приложение закроется и откроется заново.";
+        String[] options = atStartup
+                ? new String[]{"Обновить", "Не сейчас", "Пропустить эту версию"}
+                : new String[]{"Обновить", "Не сейчас"};
+        if (atStartup) {
+            question += "\n\n«Не сейчас» — спросим при следующем запуске."
+                    + "\n«Пропустить эту версию» — больше не спрашивать про неё;"
+                    + "\nпоставить её можно будет в настройках.";
+        }
+
+        int answer = ask(owner, question, "Обновление", options);
+        if (answer == 2) {
+            Updates.skip(update.version());
+            return;
+        }
         if (answer != 0) return;
 
         String failure = withProgress(owner, "Обновляю до " + update.version() + "…",
-                Updates::install);
+                step -> Updates.install(update.version(), step));
         if (failure == null) return;
         if (!failure.isBlank()) {
-            javax.swing.JOptionPane.showMessageDialog(owner,
-                    "Обновить не удалось: " + failure
-                            + "\n\nМожно обновиться вручную: brew upgrade live-translator");
+            reportFailure(owner, "Обновить не удалось.\n\n" + failure);
             return;
         }
         Updates.relaunch();
@@ -502,45 +536,170 @@ public final class Main {
     }
 
     /**
+     * Сообщает о неудаче и предлагает отправить журналы.
+     * <p>
+     * Пользователь не ходит в терминал и не найдёт, что прислать. Поэтому
+     * единственная просьба, которую имеет смысл ему адресовать, — нажать одну
+     * кнопку; остальное приложение соберёт само.
+     */
+    private static void reportFailure(java.awt.Component owner, String message) {
+        int answer = ask(owner, message
+                        + "\n\nОбновиться можно и позже — программа работает и так."
+                        + "\nА журналы помогут понять, что помешало.",
+                "Обновление", new String[]{"Отправить диагностику", "Закрыть"});
+        if (answer == 0) sendDiagnostics(owner, message);
+    }
+
+    /**
+     * Собирает журналы в один файл и открывает письмо с ним.
+     * <p>
+     * Письмо только открывается: отправить его — решение человека, в журналах
+     * лежат тексты его встреч.
+     */
+    static void sendDiagnostics(java.awt.Component owner, String reason) {
+        java.util.concurrent.atomic.AtomicReference<java.nio.file.Path> file =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        String trouble = withProgress(owner, "Собираю сведения…", step -> {
+            try {
+                file.set(Diagnostics.collect(reason, step));
+                return "";
+            } catch (IOException e) {
+                return "Собрать сведения не удалось: " + e.getMessage();
+            }
+        });
+        if (trouble == null) return;
+        if (!trouble.isBlank()) {
+            tell(owner, trouble);
+            return;
+        }
+
+        // Дальше на экран выходят чужие окна: разрешение на управление
+        // «Почтой», само письмо. Панель перевода и наши диалоги держатся
+        // поверх всех, и за ними этих окон не было бы видно.
+        OverlayWindow.yieldTop(true);
+        Thread letter = new Thread(() -> {
+            String what;
+            try {
+                what = Diagnostics.openLetter(file.get());
+            } catch (RuntimeException e) {
+                what = "Письмо открыть не удалось: " + e + "\n\nФайл лежит на рабочем столе: "
+                        + file.get().getFileName();
+            }
+            String message = what;
+            javax.swing.SwingUtilities.invokeLater(() -> {
+                OverlayWindow.yieldTop(false);
+                tell(owner, message);
+            });
+        }, "diagnostics-letter");
+        letter.setDaemon(true);
+        letter.start();
+    }
+
+    /**
      * Показывает окно ожидания, пока работа идёт в стороне.
      * <p>
-     * Обновление занимает минуту и больше, и без этого окна приложение выглядит
-     * зависшим.
+     * Окно рассказывает три вещи: какой идёт шаг, сколько времени он идёт и как
+     * его прервать. Без них полоска, которая просто крутится, ничем не
+     * отличается от зависшей программы — а именно так выглядело обновление,
+     * упёршееся в закрытый корпоративной сетью github.com.
      *
-     * @return результат работы или null, если что-то пошло совсем не так
+     * @return результат работы или null, если человек прервал её
      */
     private static String withProgress(java.awt.Component owner, String caption,
-                                      java.util.function.Supplier<String> work) {
-        // При запуске владельца нет, и это законно: окна ещё не открыты.
-        java.awt.Window parent = owner == null
-                ? null : javax.swing.SwingUtilities.getWindowAncestor(owner);
-        javax.swing.JDialog dialog = new javax.swing.JDialog(parent, "Live Translator",
-                java.awt.Dialog.ModalityType.APPLICATION_MODAL);
-        javax.swing.JPanel panel = new javax.swing.JPanel(new java.awt.BorderLayout(0, 12));
-        panel.setBorder(javax.swing.BorderFactory.createEmptyBorder(18, 20, 18, 20));
-        panel.add(new javax.swing.JLabel(caption), java.awt.BorderLayout.NORTH);
-        javax.swing.JProgressBar bar = new javax.swing.JProgressBar();
-        bar.setIndeterminate(true);
-        panel.add(bar, java.awt.BorderLayout.CENTER);
-        dialog.setContentPane(panel);
-        dialog.setAlwaysOnTop(true);
-        dialog.pack();
-        dialog.setLocationRelativeTo(owner);
-        dialog.setDefaultCloseOperation(javax.swing.JDialog.DO_NOTHING_ON_CLOSE);
-
+            java.util.function.Function<java.util.function.Consumer<String>, String> work) {
         java.util.concurrent.atomic.AtomicReference<String> result =
                 new java.util.concurrent.atomic.AtomicReference<>();
-        Thread worker = new Thread(() -> {
-            try {
-                result.set(work.get());
-            } finally {
-                javax.swing.SwingUtilities.invokeLater(dialog::dispose);
-            }
-        }, "update-worker");
-        worker.setDaemon(true);
-        worker.start();
-        dialog.setVisible(true);
-        return result.get();
+        boolean[] cancelled = {false};
+        boolean[] finished = {false};
+
+        onEdt(() -> {
+            // При запуске владельца нет, и это законно: окна ещё не открыты.
+            java.awt.Window parent = owner == null
+                    ? null : javax.swing.SwingUtilities.getWindowAncestor(owner);
+            javax.swing.JDialog dialog = new javax.swing.JDialog(parent, "Live Translator",
+                    java.awt.Dialog.ModalityType.APPLICATION_MODAL);
+
+            javax.swing.JLabel step = new javax.swing.JLabel(caption);
+            javax.swing.JLabel clock = new javax.swing.JLabel(" ");
+            clock.setFont(clock.getFont().deriveFont(java.awt.Font.PLAIN, 11f));
+            clock.setForeground(java.awt.Color.GRAY);
+            // Полоску двигаем сами. Системная «бегущая» в модальном окне
+            // замирает — снятые подряд кадры совпадают до байта, — и именно так
+            // рождается «прогресс не идёт»: программа работает, а выглядит
+            // мёртвой. Этот ход ничего не обещает, но честно показывает: жива.
+            javax.swing.JProgressBar bar = new javax.swing.JProgressBar(0, 1000);
+            javax.swing.JButton cancel = new javax.swing.JButton("Отменить");
+
+            javax.swing.JPanel middle = new javax.swing.JPanel(new java.awt.BorderLayout(0, 8));
+            middle.add(bar, java.awt.BorderLayout.NORTH);
+            middle.add(clock, java.awt.BorderLayout.CENTER);
+            javax.swing.JPanel bottom = new javax.swing.JPanel(
+                    new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 0, 0));
+            bottom.add(cancel);
+
+            javax.swing.JPanel panel = new javax.swing.JPanel(new java.awt.BorderLayout(0, 12));
+            panel.setBorder(javax.swing.BorderFactory.createEmptyBorder(18, 20, 16, 20));
+            panel.add(step, java.awt.BorderLayout.NORTH);
+            panel.add(middle, java.awt.BorderLayout.CENTER);
+            panel.add(bottom, java.awt.BorderLayout.SOUTH);
+
+            dialog.setContentPane(panel);
+            dialog.setAlwaysOnTop(true);
+            dialog.setMinimumSize(new java.awt.Dimension(380, 0));
+            dialog.pack();
+            dialog.setLocationRelativeTo(owner);
+            dialog.setDefaultCloseOperation(javax.swing.JDialog.DO_NOTHING_ON_CLOSE);
+
+            long started = System.currentTimeMillis();
+            javax.swing.Timer clockTick = new javax.swing.Timer(80, event -> {
+                long spent = System.currentTimeMillis() - started;
+                bar.setValue((int) (spent % 2400) * 1000 / 2400);
+                clock.setText("идёт " + spent / 1000 + " с");
+            });
+            clockTick.start();
+
+            // Окно закрывается сразу, не дожидаясь, пока работа свернётся:
+            // нажатая кнопка, после которой полминуты ничего не происходит, —
+            // это ровно то ощущение, от которого мы здесь избавляемся.
+            cancel.addActionListener(event -> {
+                cancelled[0] = true;
+                Updates.cancel();
+                clockTick.stop();
+                dialog.dispose();
+            });
+
+            Thread worker = new Thread(() -> {
+                String outcome;
+                try {
+                    outcome = work.apply(text ->
+                            javax.swing.SwingUtilities.invokeLater(() -> step.setText(text)));
+                } catch (RuntimeException e) {
+                    outcome = "Непредвиденная ошибка: " + e;
+                }
+                String value = outcome;
+                javax.swing.SwingUtilities.invokeLater(() -> {
+                    result.set(value);
+                    finished[0] = true;
+                    clockTick.stop();
+                    dialog.dispose();
+                });
+            }, "progress-worker");
+            worker.setDaemon(true);
+            worker.start();
+
+            // Работа могла закончиться раньше, чем окно успело показаться:
+            // тогда закрывать было нечего, а показанное сейчас окно закрыть
+            // было бы уже некому. Обе проверки идут в потоке отрисовки, и
+            // разминуться они не могут.
+            if (!finished[0]) dialog.setVisible(true);
+        });
+
+        return cancelled[0] ? null : result.get();
+    }
+
+    /** Сообщение поверх всех окон: под панелью перевода его было бы не видно. */
+    static void tell(java.awt.Component owner, String message) {
+        ask(owner, message, "Live Translator", new String[]{"Понятно"});
     }
 
     /** Модальный вопрос поверх всех окон: под окном перевода его было бы не видно. */
@@ -558,6 +717,21 @@ public final class Main {
             if (options[i].equals(choice)) return i;
         }
         return -1;
+    }
+
+    /** Swing из чужого потока не работает, а звать нас могут откуда угодно. */
+    private static void onEdt(Runnable action) {
+        if (javax.swing.SwingUtilities.isEventDispatchThread()) {
+            action.run();
+            return;
+        }
+        try {
+            javax.swing.SwingUtilities.invokeAndWait(action);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (java.lang.reflect.InvocationTargetException e) {
+            System.err.println("Окно показать не удалось: " + e.getCause());
+        }
     }
 
     /**

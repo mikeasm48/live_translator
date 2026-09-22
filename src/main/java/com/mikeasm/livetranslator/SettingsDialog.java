@@ -476,8 +476,27 @@ public final class SettingsDialog {
         auto.setAlignmentX(0);
         panel.add(auto);
         panel.add(Box.createVerticalStrut(12));
+
+        String skipped = Settings.get("LT_SKIP_VERSION").trim();
+        if (!skipped.isBlank() && Updates.newer(skipped, Main.VERSION)) {
+            panel.add(note("Версия " + skipped + " пропущена: при запуске про неё",
+                    "не спрашиваем. Поставить её можно кнопкой выше."));
+            panel.add(Box.createVerticalStrut(12));
+        }
         panel.add(note("Обновление ставится через Homebrew — тем же способом,",
                 "что и вручную, поэтому установка не разъезжается."));
+        panel.add(Box.createVerticalStrut(18));
+
+        // Кнопка нужна тому, кто не открывает терминал: иначе рассказать о
+        // поломке он может только словами, а по словам её не чинят.
+        JButton diagnostics = new JButton("Отправить диагностику");
+        diagnostics.setAlignmentX(0);
+        diagnostics.addActionListener(e ->
+                Main.sendDiagnostics(diagnostics, "отправлено вручную из настроек"));
+        panel.add(diagnostics);
+        panel.add(Box.createVerticalStrut(8));
+        panel.add(note("Соберёт журналы приложения в файл на рабочем столе",
+                "и откроет письмо разработчику. Отправите его сами."));
 
         appliers.add(() -> {
             Settings.save("LT_CHECK_UPDATES", auto.isSelected() ? "" : "false");
@@ -608,7 +627,7 @@ public final class SettingsDialog {
                     return false;
                 }
             } finally {
-                Arrays.fill(key, ' ');
+                Arrays.fill(key, '\0');
             }
             keyField.setText("");
             JOptionPane.showMessageDialog(null,
