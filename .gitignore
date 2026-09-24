@@ -5,3 +5,5 @@ logs/
 .env
 .DS_Store
 packaging/icon-1024.png
+# Записи и расшифровки настоящих встреч: в репозиторий им нельзя.
+test_data/
