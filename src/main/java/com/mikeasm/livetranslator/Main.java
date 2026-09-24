@@ -17,7 +17,7 @@ public final class Main {
 
     /** Версия приложения — попадает в Info.plist значка. */
     /** Версия приложения — попадает в Info.plist значка и в окно настроек. */
-    static final String VERSION = "0.4.13";
+    static final String VERSION = "0.4.14";
 
     public static void main(String[] args) throws Exception {
         // Первым делом: запущенное из «Программ» приложение пишет в никуда, а
