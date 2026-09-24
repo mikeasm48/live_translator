@@ -1,6 +1,7 @@
 package com.mikeasm.livetranslator;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -125,6 +126,8 @@ public final class GeminiSession implements AutoCloseable {
     private static final int QUIET_STATE_MS = 2000;
 
     private volatile String shownState = "";
+    /** Сколько ответов подряд не получилось: пока их больше нуля, связи нет. */
+    private volatile int failures;
     /** Сколько кусков сейчас в работе у модели. */
     private final java.util.concurrent.atomic.AtomicInteger inFlight =
             new java.util.concurrent.atomic.AtomicInteger();
@@ -256,8 +259,22 @@ public final class GeminiSession implements AutoCloseable {
     private static final double VOICED_SHARE_TO_SEND = 0.5;
     private static final int VOICED_MS_WITH_SHARE = 400;
 
-    /** А словарь даём только там, где голоса заведомо много и он не разбавлен. */
-    private static final double VOICED_FOR_TERMS = 0.5;
+    /**
+     * А словарь даём только там, где голоса заведомо много.
+     * <p>
+     * Прежде здесь стояла доля озвученных окон — не меньше половины куска.
+     * Порог был выведен на записях, надиктованных в микрофон ноутбука с
+     * полуметра: там у речи 85–97 % окон. На настоящей встрече, записанной
+     * тем же ноутбуком со стола переговорной, середина распределения — 30 %, а
+     * лучший кусок из двухсот пятидесяти шести дал 58 %. Словарь получали 5 %
+     * кусков, то есть почти нигде; ради этих терминов он и заведён.
+     * <p>
+     * Длительность голоса разделяет те же записи без обид: на встрече середина
+     * 3,1 с при четвертях 2,1 и 4,0, а у клавиатуры 0,03–0,16, у человеческих
+     * звуков без речи 0–0,61. Полторы секунды оставляют словарь 81 % кусков
+     * встречи и по-прежнему ноль процентов — клавиатуре и кашлю.
+     */
+    private static final int VOICED_MS_FOR_TERMS = 1500;
 
     private void send(byte[] pcm, int speechMs) {
         int length = durationMs(pcm.length);
@@ -289,10 +306,15 @@ public final class GeminiSession implements AutoCloseable {
                             length / 1000.0, voice.voicedMs() / 1000.0, voice.share() * 100));
                     return;
                 }
-                boolean terms = voice.share() >= VOICED_FOR_TERMS && shape.speechLike();
+                // Либо голоса много по времени, либо его меньше, но он плотный:
+                // короткая реплика в тишине — такая же речь, как длинная.
+                boolean muchVoice = voice.voicedMs() >= VOICED_MS_FOR_TERMS
+                        || voice.share() >= VOICED_SHARE_TO_SEND
+                                && voice.voicedMs() >= VOICED_MS_TO_SEND;
+                boolean terms = muchVoice && shape.speechLike();
                 long before = client.tokensUsed();
-                List<GeminiClient.Line> lines = client.translate(
-                        wav(pcm, config.sampleRate), true, terms);
+                List<GeminiClient.Line> lines = translate(wav(pcm, config.sampleRate), terms);
+                failures = 0;
                 // Пустой ответ — обычное дело на звуке без слов, и это как раз
                 // то, что стоит видеть в расшифровке: отправляли, но сказать
                 // модели было нечего.
@@ -311,6 +333,7 @@ public final class GeminiSession implements AutoCloseable {
                 }
             } catch (Exception e) {
                 String reason = e.getMessage() == null ? e.toString() : e.getMessage();
+                failures++;
                 listener.status("Gemini: " + reason);
                 // Оборванная цепочка — не повод молчать дальше: начинаем разговор
                 // заново, иначе ссылка на потерянный ответ будет валить и следующие.
@@ -370,6 +393,46 @@ public final class GeminiSession implements AutoCloseable {
     }
 
     /**
+     * Одна повторная попытка.
+     * <p>
+     * Связь в переговорной моргает: на настоящей встрече запросы не уходили
+     * девяносто шесть раз подряд, и каждый раз кусок речи пропадал вместе с
+     * ними — ни повтора, ни следа. Второй запрос стоит ещё столько же токенов,
+     * но потерянная фраза стоит дороже.
+     * <p>
+     * Отказ по содержимому повтором того же самого не чинится: пробуем без
+     * словаря — список терминов и есть самое необычное, что уходит в запросе.
+     */
+    private List<GeminiClient.Line> translate(byte[] wav, boolean terms) throws IOException {
+        try {
+            return client.translate(wav, true, terms);
+        } catch (IOException first) {
+            listener.note("не получилось с первого раза (" + shorten(first) + "), повторяю");
+            try {
+                Thread.sleep(RETRY_PAUSE_MS);
+            } catch (InterruptedException stop) {
+                Thread.currentThread().interrupt();
+                throw first;
+            }
+            return client.translate(wav, true, terms && !blocked(first));
+        }
+    }
+
+    /** Сколько ждать перед повтором: меньше — попадём в ту же неработающую сеть. */
+    private static final int RETRY_PAUSE_MS = 1200;
+
+    private static boolean blocked(IOException failure) {
+        String text = String.valueOf(failure.getMessage());
+        return text.contains("prohibited content") || text.contains("HTTP 400");
+    }
+
+    private static String shorten(IOException failure) {
+        String text = failure.getMessage() == null
+                ? failure.toString() : failure.getMessage();
+        return text.length() > 80 ? text.substring(0, 80) + "…" : text;
+    }
+
+    /**
      * Сводит положение дел к одной надписи.
      * <p>
      * Приоритет не случаен: ожидание ответа важнее всего — именно в эти секунды
@@ -379,6 +442,10 @@ public final class GeminiSession implements AutoCloseable {
     private void refreshState() {
         String state;
         if (paused) state = "на паузе";
+        // Оборванная связь важнее всего остального: на настоящей встрече
+        // девяносто шесть кусков подряд ушли в никуда, а в панели всё это
+        // время было написано «жду ответа модели».
+        else if (failures > 0) state = "нет связи с моделью";
         else if (inFlight.get() > 0) state = "жду ответа модели";
         else if (speaking) state = "записываю речь";
         else if (silenceRunMs >= QUIET_STATE_MS) state = "тишина";
